@@ -20,6 +20,64 @@ class HardwareAxisController:
     not in the UI.
     """
 
+    def calculate_steps(self, distance: float) -> int:
+        """
+        Convert engineering units to whole step count.
+        """
+        return int(round(abs(distance) * self.config.steps_per_unit))
+
+    def determine_direction(self, current: float, target: float) -> int | None:
+        """
+        Return configured direction value for the move.
+        Returns None if no movement is needed.
+        """
+        tol = 0.0005
+        if abs(target - current) < tol:
+            return None
+
+        if target > current:
+            return self.config.cw_value
+        return self.config.ccw_value
+
+    def calculate_step_delay(self) -> float:
+        """
+        Convert max RPM and steps/unit into a basic constant step delay.
+        This is placeholder math for fixed-speed motion.
+        """
+        if self.config.max_rpm <= 0 or self.config.steps_per_unit <= 0:
+            raise ValueError(f"{self.config.name}: invalid speed configuration")
+
+        units_per_minute = self.config.max_rpm / self.config.steps_per_unit
+        steps_per_minute = units_per_minute * self.config.steps_per_unit
+
+        if steps_per_minute <= 0:
+            raise ValueError(f"{self.config.name}: calculated steps per minute is invalid")
+
+        return 60.0 / steps_per_minute
+
+    def plan_move(self, target: float) -> dict:
+        """
+        Build a simple move plan without touching GPIO.
+        Useful for testing math before real motion is added.
+        """
+        target = self.clamp(target)
+        current = self.state.current
+        distance = target - current
+        steps = self.calculate_steps(distance)
+        direction = self.determine_direction(current, target)
+        step_delay = self.calculate_step_delay()
+
+        return {
+            "axis": self.config.name,
+            "current": current,
+            "target": target,
+            "distance": distance,
+            "steps": steps,
+            "direction": direction,
+            "step_delay": step_delay,
+        }
+
+
     def __init__(
         self,
         config: AxisConfig,
@@ -83,28 +141,27 @@ class HardwareAxisController:
         return self.state.commanded
 
     def move_to_commanded(self) -> float:
-        """
-        Placeholder for real move logic.
-
-        Future work:
-        - calculate distance to move
-        - determine direction
-        - convert distance to steps
-        - perform stepped move with timing control
-        - stop on limit sensor
-        - update current from actual move result
-        """
         if not self._gpio_ready:
             self._emit_status(f"{self.config.name}: hardware not initialized, simulated move only")
+
+        plan = self.plan_move(self.state.commanded)
+
+        if plan["direction"] is None or plan["steps"] == 0:
+            self._emit_status(f"{self.config.name}: already at commanded position")
+            self._emit_state()
+            return self.state.current
 
         self.state.is_moving = True
         self._emit_state()
 
         # Temporary placeholder behavior:
-        self.state.current = self.clamp(self.state.commanded)
+        self.state.current = plan["target"]
 
         self.state.is_moving = False
-        self._emit_status(f"{self.config.name}: hardware move placeholder to {self.state.current:.3f}")
+        self._emit_status(
+            f"{self.config.name}: move planned "
+            f"(dist={plan['distance']:.3f}, steps={plan['steps']}, delay={plan['step_delay']:.6f})"
+        )
         self._emit_state()
         return self.state.current
 

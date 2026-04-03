@@ -6,7 +6,7 @@ from backgauge_sim_controller import BackgaugeSimController
 from backgauge_hw_controller import BackgaugeHardwareController
 
 
-MODE = "SIM"  # "SIM" or "HW"
+MODE = "HW"  # "SIM" or "HW"
 
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
