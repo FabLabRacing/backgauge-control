@@ -24,6 +24,8 @@ class AxisConfig:
     max_sensor_pin: int | None = None
     cw_value: int = 0
     ccw_value: int = 1
+    simulate_timing: bool = True
+    timing_scale: float = 20.0
 
 
 @dataclass

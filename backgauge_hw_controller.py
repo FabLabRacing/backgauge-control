@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 
 from backgauge_common import (
     AxisConfig,
@@ -19,6 +20,96 @@ class HardwareAxisController:
     Real GPIO / motion code should be added incrementally inside this class,
     not in the UI.
     """
+
+    def set_direction_output(self, direction: int) -> None:
+        """
+        Placeholder for future GPIO direction output.
+        """
+        # Future:
+        # GPIO.output(self.config.direction_pin, direction)
+        pass
+
+    def pulse_step_output(self, step_delay: float) -> None:
+        """
+        Placeholder for future GPIO step pulse.
+        """
+        if not self.config.simulate_timing:
+            return
+
+        effective_delay = step_delay / max(self.config.timing_scale, 1.0)
+
+        # Future:
+        # GPIO.output(self.config.step_pin, GPIO.HIGH)
+        # time.sleep(effective_delay)
+        # GPIO.output(self.config.step_pin, GPIO.LOW)
+        # time.sleep(effective_delay)
+
+        time.sleep(effective_delay)
+        time.sleep(effective_delay)
+
+    def should_stop_for_limit(self, direction: int) -> bool:
+        """
+        Check whether motion should stop because a relevant limit is active.
+        """
+        if direction == self.config.cw_value:
+            return self.read_max_sensor()
+        if direction == self.config.ccw_value:
+            return self.read_min_sensor()
+        return False
+
+    def execute_step_move(self, target: float) -> float:
+        """
+        Execute a simple fixed-speed step move using the move plan.
+        This is the first real motion loop structure.
+        """
+        plan = self.plan_move(target)
+
+        if plan["direction"] is None or plan["steps"] == 0:
+            self._emit_status(f"{self.config.name}: already at commanded position")
+            self._emit_state()
+            return self.state.current
+
+        direction = plan["direction"]
+        steps = plan["steps"]
+        step_delay = plan["step_delay"]
+
+        self.state.is_moving = True
+        self._emit_state()
+
+        self.set_direction_output(direction)
+
+        actual_steps = 0
+        for _ in range(steps):
+            if self.should_stop_for_limit(direction):
+                self.state.last_error = f"{self.config.name}: stopped by limit sensor"
+                self._emit_status(self.state.last_error)
+                break
+
+            self.pulse_step_output(step_delay)
+            actual_steps += 1
+
+        moved_distance = actual_steps / self.config.steps_per_unit
+
+        if direction == self.config.cw_value:
+            self.state.current = self.clamp(self.state.current + moved_distance)
+        else:
+            self.state.current = self.clamp(self.state.current - moved_distance)
+
+        self.state.is_moving = False
+        self._emit_state()
+
+        if actual_steps == steps:
+            self._emit_status(
+                f"{self.config.name}: executed move "
+                f"(steps={actual_steps}, target={target:.3f})"
+            )
+        else:
+            self._emit_status(
+                f"{self.config.name}: partial move "
+                f"(steps={actual_steps}/{steps}, current={self.state.current:.3f})"
+            )
+
+        return self.state.current
 
     def calculate_steps(self, distance: float) -> int:
         """
@@ -142,28 +233,9 @@ class HardwareAxisController:
 
     def move_to_commanded(self) -> float:
         if not self._gpio_ready:
-            self._emit_status(f"{self.config.name}: hardware not initialized, simulated move only")
+            self._emit_status(f"{self.config.name}: hardware not initialized, running step-loop placeholder")
 
-        plan = self.plan_move(self.state.commanded)
-
-        if plan["direction"] is None or plan["steps"] == 0:
-            self._emit_status(f"{self.config.name}: already at commanded position")
-            self._emit_state()
-            return self.state.current
-
-        self.state.is_moving = True
-        self._emit_state()
-
-        # Temporary placeholder behavior:
-        self.state.current = plan["target"]
-
-        self.state.is_moving = False
-        self._emit_status(
-            f"{self.config.name}: move planned "
-            f"(dist={plan['distance']:.3f}, steps={plan['steps']}, delay={plan['step_delay']:.6f})"
-        )
-        self._emit_state()
-        return self.state.current
+        return self.execute_step_move(self.state.commanded)
 
     def jog(self, delta: float) -> float:
         target = self.clamp(self.state.current + delta)
