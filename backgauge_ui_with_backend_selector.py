@@ -304,7 +304,14 @@ class AxisPanel(ctk.CTkFrame):
 
     def update_colors(self):
         state = self.controller_axis.state
-        if self.controller_axis.at_home:
+        tol = 0.0005
+        at_home_position = abs(state.current - self.controller_axis.config.home_position) < tol
+        commanded_is_home = abs(state.commanded - self.controller_axis.config.home_position) < tol
+
+        if state.is_moving:
+            self.current_label.configure(text_color="orange")
+            self.at_pos_label.configure(text="MOVING", text_color="orange")
+        elif at_home_position and commanded_is_home:
             self.current_label.configure(text_color="green")
             self.at_pos_label.configure(text="HOME", text_color="green")
         elif state.in_position:
@@ -408,6 +415,11 @@ class BackgaugeApp(ctk.CTk):
         self.status_label.grid(row=1, column=0, sticky="ew", padx=14, pady=(2, 12))
 
         self.sync_from_controller()
+        self.after(100, self.periodic_refresh)
+
+    def periodic_refresh(self) -> None:
+        self.sync_from_controller()
+        self.after(100, self.periodic_refresh)
 
     def build_controller(self):
         depth_config = AxisConfig(

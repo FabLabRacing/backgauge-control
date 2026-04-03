@@ -1,5 +1,6 @@
 from __future__ import annotations
 import time
+import threading
 
 from backgauge_common import (
     AxisConfig,
@@ -183,6 +184,8 @@ class HardwareAxisController:
         self._status_callback = status_callback
         self._state_callback = state_callback
         self._gpio_ready = False
+        self._move_thread: threading.Thread | None = None
+        self._lock = threading.Lock()
 
     def set_callbacks(
         self,
@@ -232,17 +235,52 @@ class HardwareAxisController:
         return self.state.commanded
 
     def move_to_commanded(self) -> float:
-        if not self._gpio_ready:
-            self._emit_status(f"{self.config.name}: hardware not initialized, running step-loop placeholder")
+        """
+        Start a background move if one is not already running.
+        Returns the current position immediately.
+        """
+        with self._lock:
+            if self.state.is_moving:
+                self._emit_status(f"{self.config.name}: move already in progress")
+                self._emit_state()
+                return self.state.current
 
-        return self.execute_step_move(self.state.commanded)
+            if not self._gpio_ready:
+                self._emit_status(
+                    f"{self.config.name}: hardware not initialized, running step-loop placeholder"
+                )
+
+            target = self.state.commanded
+            self._move_thread = threading.Thread(
+                target=self._run_move_thread,
+                args=(target,),
+                daemon=True,
+            )
+            self._move_thread.start()
+
+        return self.state.current
+
+    def _run_move_thread(self, target: float) -> None:
+        try:
+            self.execute_step_move(target)
+        except Exception as exc:
+            self.state.is_moving = False
+            self.state.last_error = f"{self.config.name}: move thread error: {exc}"
+            self._emit_status(self.state.last_error)
+            self._emit_state()
 
     def jog(self, delta: float) -> float:
+        if self.state.is_moving:
+            self._emit_status(f"{self.config.name}: cannot jog while move is active")
+            self._emit_state()
+            return self.state.current
+
         target = self.clamp(self.state.current + delta)
         self.state.commanded = target
         self._emit_status(f"{self.config.name}: jog command to {target:.3f}")
         self._emit_state()
-        return self.move_to_commanded()
+        self.move_to_commanded()
+        return self.state.current
 
     def load_preset(self, value: float) -> float:
         value = self.clamp(value)
@@ -252,28 +290,17 @@ class HardwareAxisController:
         return value
 
     def home(self) -> float:
-        """
-        Placeholder for future homing logic.
+        if self.state.is_moving:
+            self._emit_status(f"{self.config.name}: cannot home while move is active")
+            self._emit_state()
+            return self.state.current
 
-        Future work:
-        - move toward home sensor
-        - stop when sensor is active
-        - optionally back off and re-approach slowly
-        - set current = home_position
-        - set commanded = home_position
-        """
-        self.state.is_moving = True
-        self._emit_state()
-
-        self.state.current = self.config.home_position
         self.state.commanded = self.config.home_position
-
-        self.state.is_moving = False
-        self._emit_status(f"{self.config.name}: hardware home placeholder complete")
+        self._emit_status(f"{self.config.name}: homing command issued")
         self._emit_state()
+        self.move_to_commanded()
         return self.state.current
-
-    @property
+        
     def at_home(self) -> bool:
         return abs(self.state.current - self.config.home_position) < 0.0005
 
