@@ -429,6 +429,16 @@ class BackgaugeApp(ctk.CTk):
             jog_steps=self.depth_axis.jog_steps,
             presets=self.depth_axis.presets,
             home_position=self.depth_axis.min_limit,
+            steps_per_unit=200.0,
+            max_rpm=500.0,
+            direction_pin=29,
+            step_pin=11,
+            min_sensor_pin=16,
+            max_sensor_pin=22,
+            cw_value=0,
+            ccw_value=1,
+            simulate_timing=False,
+            timing_scale=1.0,
         )
         height_config = AxisConfig(
             name=self.height_axis.name,
@@ -437,6 +447,16 @@ class BackgaugeApp(ctk.CTk):
             jog_steps=self.height_axis.jog_steps,
             presets=self.height_axis.presets,
             home_position=self.height_axis.min_limit,
+            steps_per_unit=200.0,
+            max_rpm=500.0,
+            direction_pin=31,
+            step_pin=13,
+            min_sensor_pin=18,
+            max_sensor_pin=24,
+            cw_value=0,
+            ccw_value=1,
+            simulate_timing=False,
+            timing_scale=1.0,
         )
 
         mode = MODE.upper().strip()

@@ -2,6 +2,11 @@ from __future__ import annotations
 import time
 import threading
 
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    GPIO = None
+    
 from backgauge_common import (
     AxisConfig,
     AxisRuntimeState,
@@ -24,28 +29,43 @@ class HardwareAxisController:
 
     def set_direction_output(self, direction: int) -> None:
         """
-        Placeholder for future GPIO direction output.
+        Set the hardware direction output.
         """
-        # Future:
-        # GPIO.output(self.config.direction_pin, direction)
-        pass
+        if not self._gpio_ready or GPIO is None:
+            return
+
+        if self.config.direction_pin is None:
+            return
+
+        GPIO.output(self.config.direction_pin, direction)
 
     def pulse_step_output(self, step_delay: float) -> None:
         """
-        Placeholder for future GPIO step pulse.
+        Generate one active-low step pulse for common-anode wiring.
         """
-        if not self.config.simulate_timing:
+        if not self._gpio_ready or GPIO is None:
+            if not self.config.simulate_timing:
+                return
+            effective_delay = step_delay / max(self.config.timing_scale, 1.0)
+            time.sleep(effective_delay)
+            time.sleep(effective_delay)
             return
 
-        effective_delay = step_delay / max(self.config.timing_scale, 1.0)
+        if self.config.step_pin is None:
+            return
 
-        # Future:
-        # GPIO.output(self.config.step_pin, GPIO.HIGH)
-        # time.sleep(effective_delay)
-        # GPIO.output(self.config.step_pin, GPIO.LOW)
-        # time.sleep(effective_delay)
+        effective_delay = step_delay
+        if self.config.simulate_timing:
+            effective_delay = step_delay / max(self.config.timing_scale, 1.0)
 
+        GPIO.output(self.config.step_pin, GPIO.HIGH)
         time.sleep(effective_delay)
+        GPIO.output(self.config.step_pin, GPIO.LOW)
+        time.sleep(effective_delay)
+
+        GPIO.output(self.config.step_pin, GPIO.HIGH)
+        time.sleep(effective_delay)
+        GPIO.output(self.config.step_pin, GPIO.LOW)
         time.sleep(effective_delay)
 
     def should_stop_for_limit(self, direction: int) -> bool:
@@ -61,7 +81,7 @@ class HardwareAxisController:
     def execute_step_move(self, target: float) -> float:
         """
         Execute a simple fixed-speed step move using the move plan.
-        This is the first real motion loop structure.
+        Updates current position incrementally so the UI can show motion.
         """
         plan = self.plan_move(target)
 
@@ -75,11 +95,14 @@ class HardwareAxisController:
         step_delay = plan["step_delay"]
 
         self.state.is_moving = True
+        self.state.last_error = ""
         self._emit_state()
 
         self.set_direction_output(direction)
 
         actual_steps = 0
+        update_interval = 200  # UI/state refresh every 10 steps
+
         for _ in range(steps):
             if self.should_stop_for_limit(direction):
                 self.state.last_error = f"{self.config.name}: stopped by limit sensor"
@@ -89,12 +112,12 @@ class HardwareAxisController:
             self.pulse_step_output(step_delay)
             actual_steps += 1
 
-        moved_distance = actual_steps / self.config.steps_per_unit
+            step_distance = 1.0 / self.config.steps_per_unit
+            if direction == self.config.cw_value:
+                self.state.current = self.clamp(self.state.current + step_distance)
+            else:
+                self.state.current = self.clamp(self.state.current - step_distance)
 
-        if direction == self.config.cw_value:
-            self.state.current = self.clamp(self.state.current + moved_distance)
-        else:
-            self.state.current = self.clamp(self.state.current - moved_distance)
 
         self.state.is_moving = False
         self._emit_state()
@@ -132,20 +155,7 @@ class HardwareAxisController:
         return self.config.ccw_value
 
     def calculate_step_delay(self) -> float:
-        """
-        Convert max RPM and steps/unit into a basic constant step delay.
-        This is placeholder math for fixed-speed motion.
-        """
-        if self.config.max_rpm <= 0 or self.config.steps_per_unit <= 0:
-            raise ValueError(f"{self.config.name}: invalid speed configuration")
-
-        units_per_minute = self.config.max_rpm / self.config.steps_per_unit
-        steps_per_minute = units_per_minute * self.config.steps_per_unit
-
-        if steps_per_minute <= 0:
-            raise ValueError(f"{self.config.name}: calculated steps per minute is invalid")
-
-        return 60.0 / steps_per_minute
+        return 0.001
 
     def plan_move(self, target: float) -> dict:
         """
@@ -200,23 +210,41 @@ class HardwareAxisController:
 
     def initialize_gpio(self) -> None:
         """
-        Placeholder for future GPIO setup.
-
-        Future work:
-        - import GPIO library
-        - set GPIO mode
-        - configure step/dir pins
-        - configure limit switch inputs
-        - configure driver enable if needed
+        Basic GPIO setup for step/dir outputs and limit inputs.
         """
+        if GPIO is None:
+            self._emit_status(f"{self.config.name}: RPi.GPIO not available")
+            self._emit_state()
+            return
+
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BOARD)
+
+        if self.config.direction_pin is not None:
+            GPIO.setup(self.config.direction_pin, GPIO.OUT)
+            GPIO.output(self.config.direction_pin, GPIO.LOW)  # idle state
+
+        if self.config.step_pin is not None:
+            GPIO.setup(self.config.step_pin, GPIO.OUT)
+            GPIO.output(self.config.step_pin, GPIO.LOW)  # idle state
+
+        if self.config.min_sensor_pin is not None:
+            GPIO.setup(self.config.min_sensor_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
+        if self.config.max_sensor_pin is not None:
+            GPIO.setup(self.config.max_sensor_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
         self._gpio_ready = True
         self._emit_status(f"{self.config.name}: hardware controller initialized")
         self._emit_state()
 
     def shutdown_gpio(self) -> None:
         """
-        Placeholder for future GPIO cleanup.
+        Basic GPIO cleanup for this controller.
         """
+        if GPIO is not None:
+            GPIO.cleanup()
+
         self._gpio_ready = False
         self._emit_status(f"{self.config.name}: hardware controller shutdown")
         self._emit_state()
@@ -306,9 +334,19 @@ class HardwareAxisController:
 
     def read_min_sensor(self) -> bool:
         """
-        Placeholder for future home / min limit sensor read.
+        Read the home / minimum travel sensor.
         """
-        return False
+        if not self._gpio_ready or GPIO is None or self.config.min_sensor_pin is None:
+            return False
+        return bool(GPIO.input(self.config.min_sensor_pin))
+
+    def read_max_sensor(self) -> bool:
+        """
+        Read the maximum travel sensor.
+        """
+        if not self._gpio_ready or GPIO is None or self.config.max_sensor_pin is None:
+            return False
+        return bool(GPIO.input(self.config.max_sensor_pin))
 
     def read_max_sensor(self) -> bool:
         """
