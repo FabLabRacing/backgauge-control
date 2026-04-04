@@ -352,7 +352,7 @@ class HomePanel(ctk.CTkFrame):
 class BackgaugeApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Visionary Metals Backgauge Control - UI + Sim Controller")
+        self.title("Backgauge Control - UI + Sim Controller")
         self.attributes("-fullscreen", True)
         self.bind("<Escape>", lambda event: self.destroy())
 
