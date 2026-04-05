@@ -1,18 +1,11 @@
-import configparser
-from pathlib import Path
-
 import customtkinter as ctk
 from dataclasses import dataclass, field
+import configparser
 
 from backgauge_common import AxisConfig
-from backgauge_sim_controller import BackgaugeSimController
-from backgauge_hw_controller import BackgaugeHardwareController
+from backgauge_controller import BackgaugeHardwareController
 
 
-DEFAULT_MODE = "HW"  # "SIM" or "HW"
-DEFAULT_FULLSCREEN = True
-DEFAULT_UPDATE_INTERVAL_MS = 100
-DEFAULT_SHOW_BACKGAUGE_VIEW = True
 
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
@@ -33,6 +26,10 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
+def make_preset_label(key: str) -> str:
+    return key.replace("_", " ").title()
+
+
 @dataclass
 class AxisState:
     name: str
@@ -42,80 +39,6 @@ class AxisState:
     max_limit: float = 240.0
     jog_steps: tuple[float, float, float] = (0.100, 0.010, 0.001)
     presets: list[tuple[str, float]] = field(default_factory=list)
-
-
-
-
-@dataclass
-class UiConfig:
-    mode: str = DEFAULT_MODE
-    fullscreen: bool = DEFAULT_FULLSCREEN
-    update_interval_ms: int = DEFAULT_UPDATE_INTERVAL_MS
-    show_backgauge_view: bool = DEFAULT_SHOW_BACKGAUGE_VIEW
-
-
-DEFAULT_DEPTH_PRESETS = [
-    ("Bend 1", 12.000),
-    ("Bend 2", 18.500),
-    ("Bend 3", 24.000),
-    ("Bend 4", 30.000),
-]
-
-DEFAULT_HEIGHT_PRESETS = [
-    ("5/8 Die", 10.000),
-    ("1.0 Die", 11.000),
-    ("1.5 Die", 12.000),
-    ("2.0 Die", 13.000),
-]
-
-
-def get_config_parser(config_path: str | Path = "backgauge.ini") -> tuple[configparser.ConfigParser, Path]:
-    parser = configparser.ConfigParser()
-    config_file = Path(config_path)
-    if not config_file.is_absolute():
-        config_file = Path(__file__).resolve().parent / config_file
-
-    if config_file.exists():
-        parser.read(config_file)
-
-    return parser, config_file
-
-
-def load_ui_config(config_path: str | Path = "backgauge.ini") -> UiConfig:
-    parser, _ = get_config_parser(config_path)
-
-    settings = UiConfig()
-    settings.mode = parser.get("ui", "mode", fallback=settings.mode).strip().upper()
-    if settings.mode not in ("SIM", "HW"):
-        settings.mode = DEFAULT_MODE
-
-    settings.fullscreen = parser.getboolean("ui", "fullscreen", fallback=settings.fullscreen)
-    settings.update_interval_ms = max(10, parser.getint("ui", "update_interval_ms", fallback=settings.update_interval_ms))
-    settings.show_backgauge_view = parser.getboolean("ui", "show_backgauge_view", fallback=settings.show_backgauge_view)
-
-    return settings
-
-
-def preset_label_from_key(key: str) -> str:
-    parts = [part for part in key.strip().split("_") if part]
-    if not parts:
-        return "Preset"
-    return " ".join(part.capitalize() for part in parts)
-
-
-def load_presets(parser: configparser.ConfigParser, section_name: str, fallback: list[tuple[str, float]]) -> list[tuple[str, float]]:
-    if not parser.has_section(section_name):
-        return list(fallback)
-
-    presets: list[tuple[str, float]] = []
-    for key, raw_value in parser.items(section_name):
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError):
-            continue
-        presets.append((preset_label_from_key(key), value))
-
-    return presets or list(fallback)
 
 
 class CalculatorPanel(ctk.CTkFrame):
@@ -345,19 +268,23 @@ class AxisPanel(ctk.CTkFrame):
 
         jog_frame = ctk.CTkFrame(self)
         jog_frame.grid(row=6, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 8))
-        jog_frame.grid_columnconfigure((0, 1, 2), weight=1)
+        jog_frame.grid_columnconfigure((0, 1), weight=1)
 
-        ctk.CTkLabel(jog_frame, text="Jog +", font=SECTION_FONT).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 4))
-        for idx, step in enumerate(axis.jog_steps):
-            ctk.CTkButton(jog_frame, text=f"+{step:0.3f}", height=SMALL_BUTTON_HEIGHT, command=lambda value=step: self.jog(value)).grid(
-                row=1, column=idx, sticky="ew", padx=6, pady=6
-            )
+        ctk.CTkLabel(jog_frame, text="Jog", font=SECTION_FONT).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 4))
+        ctk.CTkLabel(
+            jog_frame,
+            text="Press and hold to jog",
+            font=("Arial", 14),
+            anchor="e",
+        ).grid(row=0, column=1, sticky="e", padx=10, pady=(8, 4))
 
-        ctk.CTkLabel(jog_frame, text="Jog -", font=SECTION_FONT).grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 4))
-        for idx, step in enumerate(axis.jog_steps):
-            ctk.CTkButton(jog_frame, text=f"-{step:0.3f}", height=SMALL_BUTTON_HEIGHT, command=lambda value=step: self.jog(-value)).grid(
-                row=3, column=idx, sticky="ew", padx=6, pady=(6, 10)
-            )
+        self.jog_minus_button = ctk.CTkButton(jog_frame, text="JOG -", height=BUTTON_HEIGHT, font=BUTTON_FONT)
+        self.jog_minus_button.grid(row=1, column=0, sticky="ew", padx=(6, 6), pady=(6, 10))
+        self.jog_plus_button = ctk.CTkButton(jog_frame, text="JOG +", height=BUTTON_HEIGHT, font=BUTTON_FONT)
+        self.jog_plus_button.grid(row=1, column=1, sticky="ew", padx=(6, 6), pady=(6, 10))
+
+        self.bind_jog_button(self.jog_minus_button, -1)
+        self.bind_jog_button(self.jog_plus_button, 1)
 
         preset_frame = ctk.CTkFrame(self)
         preset_frame.grid(row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 12))
@@ -424,8 +351,19 @@ class AxisPanel(ctk.CTkFrame):
         if self.change_callback:
             self.change_callback()
 
-    def jog(self, delta: float) -> None:
-        self.controller_axis.jog(delta)
+    def bind_jog_button(self, button, direction: int) -> None:
+        button.bind("<ButtonPress-1>", lambda event, d=direction: self.start_jog(d))
+        button.bind("<ButtonRelease-1>", self.stop_jog)
+        button.bind("<Leave>", self.stop_jog)
+
+    def start_jog(self, direction: int) -> None:
+        self.controller_axis.start_jog(direction)
+        self.refresh_from_controller()
+        if self.change_callback:
+            self.change_callback()
+
+    def stop_jog(self, event=None) -> None:
+        self.controller_axis.stop_jog()
         self.refresh_from_controller()
         if self.change_callback:
             self.change_callback()
@@ -443,33 +381,33 @@ class HomePanel(ctk.CTkFrame):
 class BackgaugeApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.config_parser, self.config_path = get_config_parser()
-        self.ui_config = load_ui_config(self.config_path)
-        self.title("Backgauge Control")
-        self.attributes("-fullscreen", self.ui_config.fullscreen)
-        self.bind("<Escape>", lambda event: self.destroy())
+        self.config_data = self.load_ini()
+        self.fullscreen = self.get_config_bool("ui", "fullscreen", True)
+        self.update_interval_ms = self.get_config_int("ui", "update_interval_ms", 100)
+        self.show_backgauge_view = self.get_config_bool("ui", "show_backgauge_view", True)
+        self._sync_pending = False
 
-        depth_presets = load_presets(self.config_parser, "depth_presets", DEFAULT_DEPTH_PRESETS)
-        height_presets = load_presets(self.config_parser, "height_presets", DEFAULT_HEIGHT_PRESETS)
+        self.title("Backgauge Control")
+        self.attributes("-fullscreen", self.fullscreen)
+        self.bind("<Escape>", lambda event: self.destroy())
 
         self.depth_axis = AxisState(
             name="Stop Depth",
             min_limit=0.0,
             max_limit=240.0,
-            presets=depth_presets,
+            presets=self.load_presets("depth_presets", [("Bend 1", 12.000), ("Bend 2", 18.500), ("Bend 3", 24.000), ("Bend 4", 30.000)]),
         )
         self.height_axis = AxisState(
             name="Stop Height",
             min_limit=0.0,
             max_limit=150.0,
-            presets=height_presets,
+            presets=self.load_presets("height_presets", [("5/8 Die", 10.000), ("1.0 Die", 11.000), ("1.5 Die", 12.000), ("2.0 Die", 13.000)]),
         )
 
         self.controller = self.build_controller()
 
-        if not self.ui_config.fullscreen:
-            self.geometry(f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}")
-        self.minsize(1200, 800)
+        self.geometry(f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}")
+        self.minsize(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.grid_columnconfigure((0, 1, 2), weight=1, uniform="main")
         self.grid_rowconfigure(0, weight=1)
 
@@ -482,7 +420,7 @@ class BackgaugeApp(ctk.CTk):
         self.calculator.grid(row=0, column=0, sticky="new")
 
         self.schematic = None
-        if self.ui_config.show_backgauge_view:
+        if self.show_backgauge_view:
             self.schematic = BackgaugeSchematic(self.left_panel)
             self.schematic.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
 
@@ -499,15 +437,15 @@ class BackgaugeApp(ctk.CTk):
         self.home_panel = HomePanel(bottom_frame, self.home_all, self.home_depth, self.home_height)
         self.home_panel.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 6))
 
-        self.status_label = ctk.CTkLabel(bottom_frame, text=f"{self.ui_config.mode} MODE  |  IDLE", anchor="w", font=STATUS_FONT)
+        self.status_label = ctk.CTkLabel(bottom_frame, text="IDLE", anchor="w", font=STATUS_FONT)
         self.status_label.grid(row=1, column=0, sticky="ew", padx=14, pady=(2, 12))
 
         self.sync_from_controller()
-        self.after(self.ui_config.update_interval_ms, self.periodic_refresh)
+        self.after(self.update_interval_ms, self.periodic_refresh)
 
     def periodic_refresh(self) -> None:
         self.sync_from_controller()
-        self.after(self.ui_config.update_interval_ms, self.periodic_refresh)
+        self.after(self.update_interval_ms, self.periodic_refresh)
 
     def build_controller(self):
         depth_config = AxisConfig(
@@ -528,6 +466,7 @@ class BackgaugeApp(ctk.CTk):
             simulate_timing=False,
             timing_scale=1.0,
         )
+
         height_config = AxisConfig(
             name=self.height_axis.name,
             min_limit=self.height_axis.min_limit,
@@ -547,34 +486,75 @@ class BackgaugeApp(ctk.CTk):
             timing_scale=1.0,
         )
 
-        mode = self.ui_config.mode
-        if mode == "HW":
-            controller = BackgaugeHardwareController(
-                depth_config=depth_config,
-                height_config=height_config,
-                status_callback=self.set_status,
-                state_callback=self.sync_from_controller,
-            )
-            controller.initialize_gpio()
-            return controller
-
-        return BackgaugeSimController(
+        controller = BackgaugeHardwareController(
             depth_config=depth_config,
             height_config=height_config,
-            status_callback=self.set_status,
-            state_callback=self.sync_from_controller,
+            status_callback=self.threadsafe_status,
+            state_callback=self.request_sync,
         )
+
+        controller.initialize_gpio()
+        return controller
+
+    def load_ini(self) -> configparser.ConfigParser:
+        config = configparser.ConfigParser()
+        config.read("backgauge.ini")
+        return config
+
+    def get_config_value(self, section: str, option: str, fallback: str) -> str:
+        try:
+            return self.config_data.get(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
+    def get_config_bool(self, section: str, option: str, fallback: bool) -> bool:
+        try:
+            return self.config_data.getboolean(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
+    def get_config_int(self, section: str, option: str, fallback: int) -> int:
+        try:
+            return self.config_data.getint(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
+    def load_presets(self, section: str, fallback: list[tuple[str, float]]) -> list[tuple[str, float]]:
+        if not self.config_data.has_section(section):
+            return fallback
+
+        presets: list[tuple[str, float]] = []
+        for key, value in self.config_data.items(section):
+            try:
+                presets.append((make_preset_label(key), float(value)))
+            except ValueError:
+                continue
+
+        return presets or fallback
+
+    def threadsafe_status(self, message: str) -> None:
+        self.after(0, lambda m=message: self.set_status(m))
+
+    def request_sync(self) -> None:
+        if self._sync_pending:
+            return
+        self._sync_pending = True
+        self.after(0, self._run_sync)
+
+    def _run_sync(self) -> None:
+        self._sync_pending = False
+        self.sync_from_controller()
 
     def set_status(self, message: str) -> None:
         if hasattr(self, "status_label"):
-            self.status_label.configure(text=f"{self.ui_config.mode} MODE  |  {message}")
+            self.status_label.configure(text=message)
 
     def sync_from_controller(self) -> None:
         if hasattr(self, "depth_panel"):
             self.depth_panel.refresh_from_controller()
         if hasattr(self, "height_panel"):
             self.height_panel.refresh_from_controller()
-        if hasattr(self, "schematic"):
+        if getattr(self, "schematic", None) is not None:
             self.sync_schematic()
 
     def sync_schematic(self) -> None:
@@ -608,6 +588,16 @@ class BackgaugeApp(ctk.CTk):
         self.controller.home_all()
         self.sync_from_controller()
         self.set_status("All axes homed")
+
+    def destroy(self):
+        if hasattr(self, "controller"):
+            if hasattr(self.controller.depth, "stop_jog"):
+                self.controller.depth.stop_jog()
+            if hasattr(self.controller.height, "stop_jog"):
+                self.controller.height.stop_jog()
+            if hasattr(self.controller, "shutdown_gpio"):
+                self.controller.shutdown_gpio()
+        super().destroy()
 
 
 if __name__ == "__main__":

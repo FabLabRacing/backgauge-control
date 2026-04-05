@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+
 from backgauge_common import (
     AxisConfig,
     AxisRuntimeState,
@@ -22,6 +25,9 @@ class SimAxisController:
         )
         self._status_callback = status_callback
         self._state_callback = state_callback
+        self._jog_thread: threading.Thread | None = None
+        self._jog_stop = threading.Event()
+        self._lock = threading.Lock()
 
     def set_callbacks(
         self,
@@ -30,6 +36,9 @@ class SimAxisController:
     ) -> None:
         self._status_callback = status_callback
         self._state_callback = state_callback
+        self._jog_thread: threading.Thread | None = None
+        self._jog_stop = threading.Event()
+        self._lock = threading.Lock()
 
     def clamp(self, value: float) -> float:
         return max(self.config.min_limit, min(self.config.max_limit, value))
@@ -53,12 +62,45 @@ class SimAxisController:
         self._emit_state()
         return self.state.current
 
-    def jog(self, delta: float) -> float:
-        self.state.current = self.clamp(self.state.current + delta)
-        self.state.commanded = self.state.current
-        self._emit_status(f"{self.config.name}: jogged to {self.state.current:.3f}")
+    def start_jog(self, direction: int) -> float:
+        if direction not in (-1, 1):
+            return self.state.current
+
+        with self._lock:
+            if self.state.is_moving:
+                return self.state.current
+            self.state.is_moving = True
+            self._jog_stop.clear()
+            self._jog_thread = threading.Thread(target=self._run_jog_thread, args=(direction,), daemon=True)
+            self._jog_thread.start()
+
+        self._emit_status(f"{self.config.name}: jog {'+' if direction > 0 else '-'} start")
         self._emit_state()
         return self.state.current
+
+    def stop_jog(self) -> float:
+        self._jog_stop.set()
+        self.state.is_moving = False
+        self._emit_status(f"{self.config.name}: jog stop")
+        self._emit_state()
+        return self.state.current
+
+    def _run_jog_thread(self, direction: int) -> None:
+        step_size = 1.0 / self.config.steps_per_unit
+        step_delay = 0.01
+
+        while not self._jog_stop.is_set():
+            next_value = self.clamp(self.state.current + (direction * step_size))
+            if abs(next_value - self.state.current) < 0.0000001:
+                break
+            self.state.current = next_value
+            self.state.commanded = self.state.current
+            self._emit_state()
+            time.sleep(step_delay)
+
+        self.state.is_moving = False
+        self.state.commanded = self.state.current
+        self._emit_state()
 
     def load_preset(self, value: float) -> float:
         value = self.clamp(value)
