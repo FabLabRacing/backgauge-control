@@ -54,18 +54,37 @@ class UiConfig:
     show_backgauge_view: bool = DEFAULT_SHOW_BACKGAUGE_VIEW
 
 
-def load_ui_config(config_path: str | Path = "backgauge.ini") -> UiConfig:
+DEFAULT_DEPTH_PRESETS = [
+    ("Bend 1", 12.000),
+    ("Bend 2", 18.500),
+    ("Bend 3", 24.000),
+    ("Bend 4", 30.000),
+]
+
+DEFAULT_HEIGHT_PRESETS = [
+    ("5/8 Die", 10.000),
+    ("1.0 Die", 11.000),
+    ("1.5 Die", 12.000),
+    ("2.0 Die", 13.000),
+]
+
+
+def get_config_parser(config_path: str | Path = "backgauge.ini") -> tuple[configparser.ConfigParser, Path]:
     parser = configparser.ConfigParser()
     config_file = Path(config_path)
     if not config_file.is_absolute():
         config_file = Path(__file__).resolve().parent / config_file
 
+    if config_file.exists():
+        parser.read(config_file)
+
+    return parser, config_file
+
+
+def load_ui_config(config_path: str | Path = "backgauge.ini") -> UiConfig:
+    parser, _ = get_config_parser(config_path)
+
     settings = UiConfig()
-    if not config_file.exists():
-        return settings
-
-    parser.read(config_file)
-
     settings.mode = parser.get("ui", "mode", fallback=settings.mode).strip().upper()
     if settings.mode not in ("SIM", "HW"):
         settings.mode = DEFAULT_MODE
@@ -75,6 +94,28 @@ def load_ui_config(config_path: str | Path = "backgauge.ini") -> UiConfig:
     settings.show_backgauge_view = parser.getboolean("ui", "show_backgauge_view", fallback=settings.show_backgauge_view)
 
     return settings
+
+
+def preset_label_from_key(key: str) -> str:
+    parts = [part for part in key.strip().split("_") if part]
+    if not parts:
+        return "Preset"
+    return " ".join(part.capitalize() for part in parts)
+
+
+def load_presets(parser: configparser.ConfigParser, section_name: str, fallback: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    if not parser.has_section(section_name):
+        return list(fallback)
+
+    presets: list[tuple[str, float]] = []
+    for key, raw_value in parser.items(section_name):
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        presets.append((preset_label_from_key(key), value))
+
+    return presets or list(fallback)
 
 
 class CalculatorPanel(ctk.CTkFrame):
@@ -402,22 +443,26 @@ class HomePanel(ctk.CTkFrame):
 class BackgaugeApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.ui_config = load_ui_config()
+        self.config_parser, self.config_path = get_config_parser()
+        self.ui_config = load_ui_config(self.config_path)
         self.title("Backgauge Control")
         self.attributes("-fullscreen", self.ui_config.fullscreen)
         self.bind("<Escape>", lambda event: self.destroy())
+
+        depth_presets = load_presets(self.config_parser, "depth_presets", DEFAULT_DEPTH_PRESETS)
+        height_presets = load_presets(self.config_parser, "height_presets", DEFAULT_HEIGHT_PRESETS)
 
         self.depth_axis = AxisState(
             name="Stop Depth",
             min_limit=0.0,
             max_limit=240.0,
-            presets=[("Bend 1", 12.000), ("Bend 2", 18.500), ("Bend 3", 24.000), ("Bend 4", 30.000)],
+            presets=depth_presets,
         )
         self.height_axis = AxisState(
             name="Stop Height",
             min_limit=0.0,
             max_limit=150.0,
-            presets=[("5/8 Die", 10.000), ("1.0 Die", 11.000), ("1.5 Die", 12.000), ("2.0 Die", 13.000)],
+            presets=height_presets,
         )
 
         self.controller = self.build_controller()
