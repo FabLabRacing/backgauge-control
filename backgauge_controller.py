@@ -170,19 +170,9 @@ class HardwareAxisController:
 
         actual_steps = 0
         for _ in range(steps):
-            if self.should_stop_for_limit(direction):
-                self.state.last_error = f"{self.config.name}: stopped by limit sensor"
-                self._emit_status(self.state.last_error)
+            if not self._step_once(direction, step_delay, update_commanded=False):
                 break
-
-            self.pulse_step_output(step_delay)
-            actual_steps += 1
-
-            step_distance = 1.0 / self.config.steps_per_unit
-            if direction == self.config.cw_value:
-                self.state.current = self.clamp(self.state.current + step_distance)
-            else:
-                self.state.current = self.clamp(self.state.current - step_distance)
+            actual_steps += 1        
 
         self.state.is_moving = False
         self._emit_state()
@@ -244,34 +234,13 @@ class HardwareAxisController:
     def _run_jog_thread(self, direction: int) -> None:
         step_delay = self.calculate_step_delay()
         hw_direction = self.config.cw_value if direction > 0 else self.config.ccw_value
-        step_distance = 1.0 / self.config.steps_per_unit
 
         self.set_direction_output(hw_direction)
 
-        last_emit = time.monotonic()
-
         try:
             while not self._jog_stop.is_set():
-                if self.should_stop_for_limit(hw_direction):
-                    self.state.last_error = f"{self.config.name}: stopped by limit sensor"
-                    self._emit_status(self.state.last_error)
+                if not self._step_once(hw_direction, step_delay, update_commanded=True):
                     break
-
-                next_value = self.clamp(self.state.current + (direction * step_distance))
-
-                # If clamp prevents movement, stop jogging
-                if abs(next_value - self.state.current) < 0.0000001:
-                    break
-
-                self.pulse_step_output(step_delay)
-                self.state.current = next_value
-                self.state.commanded = self.state.current
-
-                # Only emit UI/state updates occasionally, not every step
-                now = time.monotonic()
-                if (now - last_emit) >= 0.05:   # 50 ms
-                    self._emit_state()
-                    last_emit = now
 
         finally:
             self.state.is_moving = False
@@ -308,6 +277,25 @@ class HardwareAxisController:
     def _emit_state(self) -> None:
         if self._state_callback:
             self._state_callback()
+
+    def _step_once(self, direction: int, step_delay: float, update_commanded: bool = False) -> bool:
+        if self.should_stop_for_limit(direction):
+            self.state.last_error = f"{self.config.name}: stopped by limit sensor"
+            self._emit_status(self.state.last_error)
+            return False
+
+        self.pulse_step_output(step_delay)
+
+        step_distance = 1.0 / self.config.steps_per_unit
+        if direction == self.config.cw_value:
+            self.state.current = self.clamp(self.state.current + step_distance)
+        else:
+            self.state.current = self.clamp(self.state.current - step_distance)
+
+        if update_commanded:
+            self.state.commanded = self.state.current
+
+        return True
 
 
 class BackgaugeHardwareController:

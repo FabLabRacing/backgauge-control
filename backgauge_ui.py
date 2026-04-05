@@ -266,6 +266,32 @@ class AxisPanel(ctk.CTkFrame):
             row=5, column=2, sticky="ew", padx=(6, 12), pady=6
         )
 
+        fine_jog_frame = ctk.CTkFrame(self)
+        fine_jog_frame.grid(row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 8))
+        fine_jog_frame.grid_columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
+
+        if axis.name == "Stop Depth":
+            axis_key = "Stop Depth"
+        else:
+            axis_key = "Stop Height"
+
+        fine_jog_buttons = [
+            ("-.001", -0.001),
+            ("-.010", -0.010),
+            ("-.100", -0.100),
+            ("+.001",  0.001),
+            ("+.010",  0.010),
+            ("+.100",  0.100),
+        ]
+
+        for col, (label, delta) in enumerate(fine_jog_buttons):
+            ctk.CTkButton(
+                fine_jog_frame,
+                text=label,
+                height=SMALL_BUTTON_HEIGHT,
+                command=lambda d=delta: self.nudge_axis(d),
+            ).grid(row=0, column=col, sticky="ew", padx=4, pady=6)
+
         jog_frame = ctk.CTkFrame(self)
         jog_frame.grid(row=6, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 8))
         jog_frame.grid_columnconfigure((0, 1), weight=1)
@@ -287,7 +313,7 @@ class AxisPanel(ctk.CTkFrame):
         self.bind_jog_button(self.jog_plus_button, 1)
 
         preset_frame = ctk.CTkFrame(self)
-        preset_frame.grid(row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 12))
+        preset_frame.grid(row=8, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 12))
         preset_frame.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkLabel(preset_frame, text="Presets", font=SECTION_FONT).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 6))
 
@@ -364,6 +390,17 @@ class AxisPanel(ctk.CTkFrame):
 
     def stop_jog(self, event=None) -> None:
         self.controller_axis.stop_jog()
+        self.refresh_from_controller()
+        if self.change_callback:
+            self.change_callback()
+
+    def nudge(self, delta: float) -> None:
+        if self.controller_axis.state.is_moving:
+            return
+
+        new_target = self.controller_axis.state.current + delta
+        self.controller_axis.set_commanded(new_target)
+        self.controller_axis.move_to_commanded()
         self.refresh_from_controller()
         if self.change_callback:
             self.change_callback()
@@ -598,7 +635,6 @@ class BackgaugeApp(ctk.CTk):
             if hasattr(self.controller, "shutdown_gpio"):
                 self.controller.shutdown_gpio()
         super().destroy()
-
 
 if __name__ == "__main__":
     app = BackgaugeApp()

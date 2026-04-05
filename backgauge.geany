@@ -27,9 +27,9 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=3
-FILE_NAME_0=16192;Python;0;EUTF-8;0;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge_ui.py;0;4
-FILE_NAME_1=0;Python;0;EUTF-8;0;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge_controller.py;0;4
+current_page=0
+FILE_NAME_0=25832;Python;0;EUTF-8;0;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge_ui.py;0;4
+FILE_NAME_1=8830;Python;0;EUTF-8;0;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge_controller.py;0;4
 FILE_NAME_2=0;Python;0;EUTF-8;0;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge_common.py;0;4
 FILE_NAME_3=0;Conf;0;EUTF-8;1;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge.ini;0;4
 
