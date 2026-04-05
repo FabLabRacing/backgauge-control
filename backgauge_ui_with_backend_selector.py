@@ -1,3 +1,6 @@
+import configparser
+from pathlib import Path
+
 import customtkinter as ctk
 from dataclasses import dataclass, field
 
@@ -6,7 +9,10 @@ from backgauge_sim_controller import BackgaugeSimController
 from backgauge_hw_controller import BackgaugeHardwareController
 
 
-MODE = "HW"  # "SIM" or "HW"
+DEFAULT_MODE = "HW"  # "SIM" or "HW"
+DEFAULT_FULLSCREEN = True
+DEFAULT_UPDATE_INTERVAL_MS = 100
+DEFAULT_SHOW_BACKGAUGE_VIEW = True
 
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
@@ -36,6 +42,39 @@ class AxisState:
     max_limit: float = 240.0
     jog_steps: tuple[float, float, float] = (0.100, 0.010, 0.001)
     presets: list[tuple[str, float]] = field(default_factory=list)
+
+
+
+
+@dataclass
+class UiConfig:
+    mode: str = DEFAULT_MODE
+    fullscreen: bool = DEFAULT_FULLSCREEN
+    update_interval_ms: int = DEFAULT_UPDATE_INTERVAL_MS
+    show_backgauge_view: bool = DEFAULT_SHOW_BACKGAUGE_VIEW
+
+
+def load_ui_config(config_path: str | Path = "backgauge.ini") -> UiConfig:
+    parser = configparser.ConfigParser()
+    config_file = Path(config_path)
+    if not config_file.is_absolute():
+        config_file = Path(__file__).resolve().parent / config_file
+
+    settings = UiConfig()
+    if not config_file.exists():
+        return settings
+
+    parser.read(config_file)
+
+    settings.mode = parser.get("ui", "mode", fallback=settings.mode).strip().upper()
+    if settings.mode not in ("SIM", "HW"):
+        settings.mode = DEFAULT_MODE
+
+    settings.fullscreen = parser.getboolean("ui", "fullscreen", fallback=settings.fullscreen)
+    settings.update_interval_ms = max(10, parser.getint("ui", "update_interval_ms", fallback=settings.update_interval_ms))
+    settings.show_backgauge_view = parser.getboolean("ui", "show_backgauge_view", fallback=settings.show_backgauge_view)
+
+    return settings
 
 
 class CalculatorPanel(ctk.CTkFrame):
@@ -147,8 +186,8 @@ class BackgaugeSchematic(ctk.CTkFrame):
         self.depth_commanded = 0.0
         self.height_current = 0.0
         self.height_commanded = 0.0
-        self.depth_max = 240.0
-        self.height_max = 150.0
+        self.depth_max = 40.0
+        self.height_max = 15.0
         self.in_position = True
 
         self.grid_columnconfigure(0, weight=1)
@@ -363,8 +402,9 @@ class HomePanel(ctk.CTkFrame):
 class BackgaugeApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.ui_config = load_ui_config()
         self.title("Backgauge Control")
-        self.attributes("-fullscreen", True)
+        self.attributes("-fullscreen", self.ui_config.fullscreen)
         self.bind("<Escape>", lambda event: self.destroy())
 
         self.depth_axis = AxisState(
@@ -382,8 +422,9 @@ class BackgaugeApp(ctk.CTk):
 
         self.controller = self.build_controller()
 
-        self.geometry(f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}")
-        self.minsize(SCREEN_WIDTH, SCREEN_HEIGHT)
+        if not self.ui_config.fullscreen:
+            self.geometry(f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}")
+        self.minsize(1200, 800)
         self.grid_columnconfigure((0, 1, 2), weight=1, uniform="main")
         self.grid_rowconfigure(0, weight=1)
 
@@ -395,8 +436,10 @@ class BackgaugeApp(ctk.CTk):
         self.calculator = CalculatorPanel(self.left_panel, self.send_calculator_to_depth, self.send_calculator_to_height)
         self.calculator.grid(row=0, column=0, sticky="new")
 
-        self.schematic = BackgaugeSchematic(self.left_panel)
-        self.schematic.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        self.schematic = None
+        if self.ui_config.show_backgauge_view:
+            self.schematic = BackgaugeSchematic(self.left_panel)
+            self.schematic.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
 
         self.depth_panel = AxisPanel(self, self.depth_axis, self.controller.depth, self.sync_schematic)
         self.depth_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=PANEL_PADY)
@@ -411,15 +454,15 @@ class BackgaugeApp(ctk.CTk):
         self.home_panel = HomePanel(bottom_frame, self.home_all, self.home_depth, self.home_height)
         self.home_panel.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 6))
 
-        self.status_label = ctk.CTkLabel(bottom_frame, text=f"{MODE} MODE  |  IDLE", anchor="w", font=STATUS_FONT)
+        self.status_label = ctk.CTkLabel(bottom_frame, text=f"{self.ui_config.mode} MODE  |  IDLE", anchor="w", font=STATUS_FONT)
         self.status_label.grid(row=1, column=0, sticky="ew", padx=14, pady=(2, 12))
 
         self.sync_from_controller()
-        self.after(100, self.periodic_refresh)
+        self.after(self.ui_config.update_interval_ms, self.periodic_refresh)
 
     def periodic_refresh(self) -> None:
         self.sync_from_controller()
-        self.after(100, self.periodic_refresh)
+        self.after(self.ui_config.update_interval_ms, self.periodic_refresh)
 
     def build_controller(self):
         depth_config = AxisConfig(
@@ -459,7 +502,7 @@ class BackgaugeApp(ctk.CTk):
             timing_scale=1.0,
         )
 
-        mode = MODE.upper().strip()
+        mode = self.ui_config.mode
         if mode == "HW":
             controller = BackgaugeHardwareController(
                 depth_config=depth_config,
@@ -479,7 +522,7 @@ class BackgaugeApp(ctk.CTk):
 
     def set_status(self, message: str) -> None:
         if hasattr(self, "status_label"):
-            self.status_label.configure(text=f"{MODE} MODE  |  {message}")
+            self.status_label.configure(text=f"{self.ui_config.mode} MODE  |  {message}")
 
     def sync_from_controller(self) -> None:
         if hasattr(self, "depth_panel"):
