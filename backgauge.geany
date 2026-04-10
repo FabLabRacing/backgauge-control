@@ -11,7 +11,7 @@ replace_tabs=false
 
 [indentation]
 indent_width=4
-indent_type=1
+indent_type=0
 indent_hard_tab_width=8
 detect_indent=true
 detect_indent_width=true
@@ -21,17 +21,14 @@ indent_mode=2
 name=backgauge
 base_path=/home/jakerson/projects/backgauge
 description=
+file_patterns=
 
 [long line marker]
 long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=0
-FILE_NAME_0=25832;Python;0;EUTF-8;0;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge_ui.py;0;4
-FILE_NAME_1=8830;Python;0;EUTF-8;0;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge_controller.py;0;4
-FILE_NAME_2=0;Python;0;EUTF-8;0;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge_common.py;0;4
-FILE_NAME_3=0;Conf;0;EUTF-8;1;1;0;%2Fhome%2Fjakerson%2Fprojects%2Fbackgauge%2Fbackgauge.ini;0;4
+current_page=-1
 
 [VTE]
 last_dir=/home/jakerson
