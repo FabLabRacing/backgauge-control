@@ -484,7 +484,18 @@ class BackgaugeApp(ctk.CTk):
         self.sync_from_controller()
         self.after(self.update_interval_ms, self.periodic_refresh)
 
+    def get_config_float(self, section: str, option: str, fallback: float) -> float:
+        try:
+            return self.config_data.getfloat(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
     def build_controller(self):
+        depth_steps_per_unit = self.get_config_float("depth_motion", "steps_per_unit", 200.0)
+        depth_max_rpm = self.get_config_float("depth_motion", "max_rpm", 500.0)
+        height_steps_per_unit = self.get_config_float("height_motion", "steps_per_unit", 200.0)
+        height_max_rpm = self.get_config_float("height_motion", "max_rpm", 500.0)
+
         depth_config = AxisConfig(
             name=self.depth_axis.name,
             min_limit=self.depth_axis.min_limit,
@@ -492,8 +503,8 @@ class BackgaugeApp(ctk.CTk):
             jog_steps=self.depth_axis.jog_steps,
             presets=self.depth_axis.presets,
             home_position=self.depth_axis.min_limit,
-            steps_per_unit=200.0,
-            max_rpm=500.0,
+            steps_per_unit=depth_steps_per_unit,
+            max_rpm=depth_max_rpm,
             direction_pin=29,
             step_pin=11,
             min_sensor_pin=16,
@@ -511,8 +522,8 @@ class BackgaugeApp(ctk.CTk):
             jog_steps=self.height_axis.jog_steps,
             presets=self.height_axis.presets,
             home_position=self.height_axis.min_limit,
-            steps_per_unit=200.0,
-            max_rpm=500.0,
+            steps_per_unit=height_steps_per_unit,
+            max_rpm=height_max_rpm,
             direction_pin=31,
             step_pin=13,
             min_sensor_pin=18,
