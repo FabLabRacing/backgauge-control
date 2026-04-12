@@ -1,0 +1,12 @@
+import hashlib
+
+# 1. Create a SHA-256 hash object
+hash_object = hashlib.sha256()
+
+# 2. Update the object with bytes
+hash_object.update(b"7896")
+
+# 3. Get the result as a hexadecimal string
+hex_dig = hash_object.hexdigest()
+print(hex_dig) 
+# Output: a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e
