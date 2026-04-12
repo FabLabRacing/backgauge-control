@@ -484,54 +484,113 @@ class BackgaugeApp(ctk.CTk):
         self.sync_from_controller()
         self.after(self.update_interval_ms, self.periodic_refresh)
 
+
     def get_config_float(self, section: str, option: str, fallback: float) -> float:
         try:
             return self.config_data.getfloat(section, option, fallback=fallback)
         except Exception:
             return fallback
 
+    def get_config_int(self, section: str, option: str, fallback: int) -> int:
+        try:
+            return self.config_data.getint(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
+    def get_config_bool(self, section: str, option: str, fallback: bool) -> bool:
+        try:
+            return self.config_data.getboolean(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
+    def get_config_jog_steps(self, section: str, fallback: tuple[float, float, float]) -> tuple[float, float, float]:
+        try:
+            js1 = self.get_config_float(section, "jog_step_1", fallback[0])
+            js2 = self.get_config_float(section, "jog_step_2", fallback[1])
+            js3 = self.get_config_float(section, "jog_step_3", fallback[2])
+            return (js1, js2, js3)
+        except Exception:
+            return fallback
+
+    def get_config_pin(self, section: str, option: str, fallback: int) -> int:
+        try:
+            return self.config_data.getint(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
     def build_controller(self):
-        depth_steps_per_unit = self.get_config_float("depth_motion", "steps_per_unit", 200.0)
-        depth_max_rpm = self.get_config_float("depth_motion", "max_rpm", 500.0)
-        height_steps_per_unit = self.get_config_float("height_motion", "steps_per_unit", 200.0)
-        height_max_rpm = self.get_config_float("height_motion", "max_rpm", 500.0)
+        # Depth axis config
+        depth_section = "depth_motion"
+        depth_pins_section = "depth_pins"
+        depth_min_limit = self.get_config_float(depth_section, "min_limit", 0.0)
+        depth_max_limit = self.get_config_float(depth_section, "max_limit", 240.0)
+        depth_home_position = self.get_config_float(depth_section, "home_position", depth_min_limit)
+        depth_steps_per_unit = self.get_config_float(depth_section, "steps_per_unit", 200.0)
+        depth_max_rpm = self.get_config_float(depth_section, "max_rpm", 500.0)
+        depth_cw_value = self.get_config_int(depth_section, "cw_value", 0)
+        depth_ccw_value = self.get_config_int(depth_section, "ccw_value", 1)
+        depth_simulate_timing = self.get_config_bool(depth_section, "simulate_timing", False)
+        depth_timing_scale = self.get_config_float(depth_section, "timing_scale", 1.0)
+        depth_jog_steps = self.get_config_jog_steps(depth_section, (0.100, 0.010, 0.001))
+        depth_direction_pin = self.get_config_pin(depth_pins_section, "direction_pin", 29)
+        depth_step_pin = self.get_config_pin(depth_pins_section, "step_pin", 11)
+        depth_min_sensor_pin = self.get_config_pin(depth_pins_section, "min_sensor_pin", 16)
+        depth_max_sensor_pin = self.get_config_pin(depth_pins_section, "max_sensor_pin", 22)
+
+        # Height axis config
+        height_section = "height_motion"
+        height_pins_section = "height_pins"
+        height_min_limit = self.get_config_float(height_section, "min_limit", 0.0)
+        height_max_limit = self.get_config_float(height_section, "max_limit", 150.0)
+        height_home_position = self.get_config_float(height_section, "home_position", height_min_limit)
+        height_steps_per_unit = self.get_config_float(height_section, "steps_per_unit", 200.0)
+        height_max_rpm = self.get_config_float(height_section, "max_rpm", 500.0)
+        height_cw_value = self.get_config_int(height_section, "cw_value", 0)
+        height_ccw_value = self.get_config_int(height_section, "ccw_value", 1)
+        height_simulate_timing = self.get_config_bool(height_section, "simulate_timing", False)
+        height_timing_scale = self.get_config_float(height_section, "timing_scale", 1.0)
+        height_jog_steps = self.get_config_jog_steps(height_section, (0.100, 0.010, 0.001))
+        height_direction_pin = self.get_config_pin(height_pins_section, "direction_pin", 31)
+        height_step_pin = self.get_config_pin(height_pins_section, "step_pin", 13)
+        height_min_sensor_pin = self.get_config_pin(height_pins_section, "min_sensor_pin", 18)
+        height_max_sensor_pin = self.get_config_pin(height_pins_section, "max_sensor_pin", 24)
 
         depth_config = AxisConfig(
             name=self.depth_axis.name,
-            min_limit=self.depth_axis.min_limit,
-            max_limit=self.depth_axis.max_limit,
-            jog_steps=self.depth_axis.jog_steps,
+            min_limit=depth_min_limit,
+            max_limit=depth_max_limit,
+            jog_steps=depth_jog_steps,
             presets=self.depth_axis.presets,
-            home_position=self.depth_axis.min_limit,
+            home_position=depth_home_position,
             steps_per_unit=depth_steps_per_unit,
             max_rpm=depth_max_rpm,
-            direction_pin=29,
-            step_pin=11,
-            min_sensor_pin=16,
-            max_sensor_pin=22,
-            cw_value=0,
-            ccw_value=1,
-            simulate_timing=False,
-            timing_scale=1.0,
+            direction_pin=depth_direction_pin,
+            step_pin=depth_step_pin,
+            min_sensor_pin=depth_min_sensor_pin,
+            max_sensor_pin=depth_max_sensor_pin,
+            cw_value=depth_cw_value,
+            ccw_value=depth_ccw_value,
+            simulate_timing=depth_simulate_timing,
+            timing_scale=depth_timing_scale,
         )
 
         height_config = AxisConfig(
             name=self.height_axis.name,
-            min_limit=self.height_axis.min_limit,
-            max_limit=self.height_axis.max_limit,
-            jog_steps=self.height_axis.jog_steps,
+            min_limit=height_min_limit,
+            max_limit=height_max_limit,
+            jog_steps=height_jog_steps,
             presets=self.height_axis.presets,
-            home_position=self.height_axis.min_limit,
+            home_position=height_home_position,
             steps_per_unit=height_steps_per_unit,
             max_rpm=height_max_rpm,
-            direction_pin=31,
-            step_pin=13,
-            min_sensor_pin=18,
-            max_sensor_pin=24,
-            cw_value=0,
-            ccw_value=1,
-            simulate_timing=False,
-            timing_scale=1.0,
+            direction_pin=height_direction_pin,
+            step_pin=height_step_pin,
+            min_sensor_pin=height_min_sensor_pin,
+            max_sensor_pin=height_max_sensor_pin,
+            cw_value=height_cw_value,
+            ccw_value=height_ccw_value,
+            simulate_timing=height_simulate_timing,
+            timing_scale=height_timing_scale,
         )
 
         controller = BackgaugeHardwareController(
