@@ -4,16 +4,16 @@ update_interval_ms = 20
 show_backgauge_view = true
 
 [depth_presets]
-bend_1 = 1.062
-bend_2 = 2.125
-bend_3 = 3.25
-bend_4 = 4.378
+bend_1 = 2.062
+bend_2 = 3.125
+bend_3 = 4.25
+bend_4 = 5.378
 
 [height_presets]
-die_5_8 = 1.000
-die_1_0 = 2.000
-die_1_5 = 3.000
-die_2_0 = 4.000
+die_5_8 = 1.500
+die_1_0 = 2.500
+die_1_5 = 3.500
+die_2_0 = 4.500
 
 [depth_motion]
 min_limit = 0.000
@@ -56,5 +56,5 @@ min_sensor_pin = 18
 max_sensor_pin = 24
 
 [security]
-machine_setup_password = cad6ddf10c7f185baa569652306063313da25e747d9c7c2ce29f5b1d3bd216cb
+machine_setup_password = 03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4
 

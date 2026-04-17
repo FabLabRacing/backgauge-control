@@ -10,7 +10,6 @@ from backgauge_common import AxisConfig
 from backgauge_controller import BackgaugeHardwareController
 
 
-
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 CONF_SCREEN_WIDTH = 800
@@ -32,10 +31,60 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
+CONFIG_FILE = "backgauge.ini"
+SECURITY_SECTION = "security"
+PASSWORD_KEY = "machine_setup_password"
+BACKUP_SUFFIX = ".bak"
+
+PROTECTED_SECTIONS = [
+    "ui",
+    "depth_motion",
+    "height_motion",
+    "depth_pins",
+    "height_pins",
+    "security",
+]
+
+PRESET_SECTIONS = [
+    "depth_presets",
+    "height_presets",
+]
 
 
 def make_preset_label(key: str) -> str:
     return key.replace("_", " ").title()
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def get_password_from_ini(path=CONFIG_FILE) -> str:
+    config = configparser.ConfigParser()
+    config.read(path)
+    return config.get(SECURITY_SECTION, PASSWORD_KEY, fallback="")
+
+
+def set_password_in_ini(new_password: str, config_path=CONFIG_FILE) -> None:
+    config = configparser.ConfigParser()
+    config.read(config_path)
+    if SECURITY_SECTION not in config:
+        config[SECURITY_SECTION] = {}
+
+    config[SECURITY_SECTION][PASSWORD_KEY] = hash_password(new_password)
+
+    config_dir = os.path.dirname(os.path.abspath(config_path)) or "."
+    with tempfile.NamedTemporaryFile("w", delete=False, dir=config_dir) as tf:
+        config.write(tf)
+        tempname = tf.name
+
+    os.replace(tempname, config_path)
+
+
+def backup_ini(path: str) -> str:
+    backup_file = path + BACKUP_SUFFIX
+    shutil.copy2(path, backup_file)
+    return backup_file
 
 
 @dataclass
@@ -179,7 +228,14 @@ class BackgaugeSchematic(ctk.CTkFrame):
         )
         self.legend.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
 
-    def set_values(self, depth_current: float, depth_commanded: float, height_current: float, height_commanded: float, in_position: bool):
+    def set_values(
+        self,
+        depth_current: float,
+        depth_commanded: float,
+        height_current: float,
+        height_commanded: float,
+        in_position: bool,
+    ):
         self.depth_current = depth_current
         self.depth_commanded = depth_commanded
         self.height_current = height_current
@@ -278,14 +334,13 @@ class AxisPanel(ctk.CTkFrame):
         fine_jog_frame.grid(row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 8))
         fine_jog_frame.grid_columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
 
-
         fine_jog_buttons = [
             ("-.001", -0.001),
             ("-.010", -0.010),
             ("-.100", -0.100),
-            ("+.001",  0.001),
-            ("+.010",  0.010),
-            ("+.100",  0.100),
+            ("+.001", 0.001),
+            ("+.010", 0.010),
+            ("+.100", 0.100),
         ]
 
         for col, (label, delta) in enumerate(fine_jog_buttons):
@@ -316,21 +371,40 @@ class AxisPanel(ctk.CTkFrame):
         self.bind_jog_button(self.jog_minus_button, -1)
         self.bind_jog_button(self.jog_plus_button, 1)
 
-        preset_frame = ctk.CTkFrame(self)
-        preset_frame.grid(row=8, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 12))
-        preset_frame.grid_columnconfigure((0, 1), weight=1)
-        ctk.CTkLabel(preset_frame, text="Presets", font=SECTION_FONT).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 6))
-
-        for idx, (label, value) in enumerate(axis.presets):
-            ctk.CTkButton(preset_frame, text=label, height=SMALL_BUTTON_HEIGHT, command=lambda v=value: self.set_commanded(v)).grid(
-                row=1 + idx // 2, column=idx % 2, sticky="ew", padx=6, pady=6
-            )
+        self.preset_frame = ctk.CTkFrame(self)
+        self.preset_frame.grid(row=8, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 12))
+        self.preset_frame.grid_columnconfigure((0, 1), weight=1)
+        self.rebuild_preset_buttons()
 
         self.refresh_from_controller()
 
     @staticmethod
     def format_value(value: float) -> str:
         return f"{value:.3f}"
+
+    def rebuild_preset_buttons(self) -> None:
+        for child in self.preset_frame.winfo_children():
+            child.destroy()
+
+        self.preset_frame.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkLabel(
+            self.preset_frame,
+            text="Presets",
+            font=SECTION_FONT,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 6))
+
+        for idx, (label, value) in enumerate(self.axis.presets):
+            ctk.CTkButton(
+                self.preset_frame,
+                text=label,
+                height=SMALL_BUTTON_HEIGHT,
+                command=lambda v=value: self.set_commanded(v),
+            ).grid(row=1 + idx // 2, column=idx % 2, sticky="ew", padx=6, pady=6)
+
+    def update_presets(self, presets: list[tuple[str, float]]) -> None:
+        self.axis.presets = presets
+        self.rebuild_preset_buttons()
+
 
     def refresh_from_controller(self) -> None:
         state = self.controller_axis.state
@@ -419,6 +493,236 @@ class HomePanel(ctk.CTkFrame):
         ctk.CTkButton(self, text="Home Height", height=BUTTON_HEIGHT, command=home_height).grid(row=0, column=2, sticky="ew", padx=8, pady=8)
 
 
+class PasswordDialog(ctk.CTkToplevel):
+    def __init__(self, master, title="Password Required"):
+        super().__init__(master)
+        self.title(title)
+        self.resizable(False, False)
+        self.result = None
+        ctk.CTkLabel(self, text="Enter password:", font=LABEL_FONT).grid(row=0, column=0, padx=18, pady=18)
+        self.pw_var = ctk.StringVar()
+        self.entry = ctk.CTkEntry(self, textvariable=self.pw_var, show="*", font=ENTRY_FONT, width=200)
+        self.entry.grid(row=0, column=1, padx=18, pady=18)
+        self.entry.focus()
+        btn = ctk.CTkButton(self, text="OK", font=BUTTON_FONT, command=self.on_ok, height=BUTTON_HEIGHT)
+        btn.grid(row=1, column=0, columnspan=2, pady=(0, 18))
+        self.bind("<Return>", lambda e: self.on_ok())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def on_ok(self):
+        self.result = self.pw_var.get()
+        self.destroy()
+
+
+class ChangePasswordDialog(ctk.CTkToplevel):
+    def __init__(self, master, title="Change Password"):
+        super().__init__(master)
+        self.title(title)
+        self.resizable(False, False)
+        self.result = None
+        ctk.CTkLabel(self, text="Current password:", font=LABEL_FONT).grid(row=0, column=0, padx=18, pady=8)
+        ctk.CTkLabel(self, text="New password:", font=LABEL_FONT).grid(row=1, column=0, padx=18, pady=8)
+        ctk.CTkLabel(self, text="Confirm new password:", font=LABEL_FONT).grid(row=2, column=0, padx=18, pady=8)
+        self.old_pw = ctk.CTkEntry(self, show="*", font=ENTRY_FONT)
+        self.new_pw = ctk.CTkEntry(self, show="*", font=ENTRY_FONT)
+        self.conf_pw = ctk.CTkEntry(self, show="*", font=ENTRY_FONT)
+        self.old_pw.grid(row=0, column=1, padx=18, pady=8)
+        self.new_pw.grid(row=1, column=1, padx=18, pady=8)
+        self.conf_pw.grid(row=2, column=1, padx=18, pady=8)
+        btn = ctk.CTkButton(self, text="OK", font=BUTTON_FONT, command=self.on_ok, height=BUTTON_HEIGHT)
+        btn.grid(row=3, column=0, columnspan=2, pady=(0, 18))
+        self.bind("<Return>", lambda e: self.on_ok())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def on_ok(self):
+        self.result = (
+            self.old_pw.get(),
+            self.new_pw.get(),
+            self.conf_pw.get()
+        )
+        self.destroy()
+
+
+class ConfigEditor(ctk.CTkToplevel):
+    def __init__(self, master, config_file, allowed_sections=None, allow_password_change=True, close_on_save=False):
+        super().__init__(master)
+        self.title("Configuration Editor")
+        self.geometry(f"{CONF_SCREEN_WIDTH}x{CONF_SCREEN_HEIGHT}")
+        self.config_file = config_file
+        self.allowed_sections = allowed_sections
+        self.allow_password_change = allow_password_change
+        self.close_on_save = close_on_save
+        self.config = configparser.ConfigParser()
+        self.fields = {}
+        self.create_widgets()
+        self.load_config()
+
+    def create_widgets(self):
+        self.notebook = ctk.CTkTabview(
+            self,
+            width=CONF_SCREEN_WIDTH - 2 * PANEL_PADX,
+            height=CONF_SCREEN_HEIGHT - 120,
+        )
+        self.notebook.pack(fill="both", expand=True, padx=PANEL_PADX, pady=(PANEL_PADY, 0))
+
+        self.button_frame = ctk.CTkFrame(self)
+        self.button_frame.pack(fill="x", padx=PANEL_PADX, pady=(10, PANEL_PADY))
+
+        ctk.CTkButton(
+            self.button_frame,
+            text="Save",
+            command=self.save_config,
+            font=BUTTON_FONT,
+            height=BUTTON_HEIGHT,
+        ).pack(side="left", padx=8)
+
+        ctk.CTkButton(
+            self.button_frame,
+            text="Cancel",
+            command=self.destroy,
+            font=BUTTON_FONT,
+            height=BUTTON_HEIGHT,
+        ).pack(side="left", padx=8)
+
+        ctk.CTkButton(
+            self.button_frame,
+            text="Reload from file",
+            command=self.load_config,
+            font=BUTTON_FONT,
+            height=BUTTON_HEIGHT,
+        ).pack(side="left", padx=8)
+
+        if self.allow_password_change:
+            ctk.CTkButton(
+                self.button_frame,
+                text="Change Password",
+                command=self.change_password,
+                font=BUTTON_FONT,
+                height=BUTTON_HEIGHT,
+            ).pack(side="right", padx=8)
+
+    def load_config(self):
+        self.config.read(self.config_file)
+
+        if hasattr(self.notebook, "tabs"):
+            for tab_name in self.notebook.tabs():
+                self.notebook.delete(tab_name)
+        else:
+            for tab_name in list(self.notebook._tab_dict.keys()):
+                self.notebook.delete(tab_name)
+
+        self.fields.clear()
+
+        for section in self.config.sections():
+            if self.allowed_sections is not None and section not in self.allowed_sections:
+                continue
+
+            self.notebook.add(section)
+            tab_frame = self.notebook.tab(section)
+            tab_frame.grid_columnconfigure(1, weight=1)
+            self.fields[section] = {}
+            row = 0
+
+            for key, value in self.config[section].items():
+                if section == SECURITY_SECTION and key == PASSWORD_KEY:
+                    continue
+
+                ctk.CTkLabel(tab_frame, text=key, font=LABEL_FONT).grid(
+                    row=row, column=0, sticky="w", padx=12, pady=6
+                )
+                entry = ctk.CTkEntry(tab_frame, font=ENTRY_FONT, width=220)
+                entry.insert(0, value)
+                entry.grid(row=row, column=1, sticky="ew", padx=12, pady=6)
+                self.fields[section][key] = entry
+                row += 1
+
+    def save_config(self):
+        key_types = {
+            "min_limit": float,
+            "max_limit": float,
+            "home_position": float,
+            "steps_per_unit": float,
+            "max_rpm": float,
+            "cw_value": int,
+            "ccw_value": int,
+            "simulate_timing": bool,
+            "timing_scale": float,
+            "jog_step_1": float,
+            "jog_step_2": float,
+            "jog_step_3": float,
+            "step_pin": int,
+            "direction_pin": int,
+            "min_sensor_pin": int,
+            "max_sensor_pin": int,
+            "fullscreen": bool,
+            "update_interval_ms": int,
+            "show_backgauge_view": bool,
+        }
+
+        for section, keys in self.fields.items():
+            for key, entry in keys.items():
+                value = entry.get()
+                expected_type = key_types.get(key)
+
+                if expected_type is bool:
+                    if value.lower() not in ["true", "false"]:
+                        messagebox.showerror("Validation Error", f"{section}.{key} must be 'true' or 'false'")
+                        return
+                elif expected_type is int:
+                    try:
+                        int(value)
+                    except ValueError:
+                        messagebox.showerror("Validation Error", f"{section}.{key} must be an integer")
+                        return
+                elif expected_type is float:
+                    try:
+                        float(value)
+                    except ValueError:
+                        messagebox.showerror("Validation Error", f"{section}.{key} must be a float")
+                        return
+
+                self.config[section][key] = value
+
+        try:
+            backup_file = backup_ini(self.config_file)
+            config_dir = os.path.dirname(os.path.abspath(self.config_file)) or "."
+            with tempfile.NamedTemporaryFile("w", delete=False, dir=config_dir) as tf:
+                self.config.write(tf)
+                tempname = tf.name
+            os.replace(tempname, self.config_file)
+            messagebox.showinfo("Success", f"Configuration saved.\nBackup: {backup_file}")
+            if self.close_on_save:
+                self.destroy()
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save config: {e}")
+
+    def change_password(self):
+        dlg = ChangePasswordDialog(self, title="Change Password")
+        dlg.wait_visibility()
+        dlg.grab_set()
+        self.wait_window(dlg)
+
+        if dlg.result:
+            old_pw, new_pw, conf_pw = dlg.result
+            current_hash = get_password_from_ini(self.config_file)
+
+            if hash_password(old_pw) != current_hash:
+                messagebox.showerror("Error", "Current password is incorrect.")
+                return
+
+            if not new_pw or new_pw != conf_pw:
+                messagebox.showerror("Error", "New passwords do not match or are empty.")
+                return
+
+            try:
+                if SECURITY_SECTION not in self.config:
+                    self.config[SECURITY_SECTION] = {}
+                self.config[SECURITY_SECTION][PASSWORD_KEY] = hash_password(new_pw)
+                self.save_config()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to change password: {e}")
+
+
 class BackgaugeApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -437,13 +741,19 @@ class BackgaugeApp(ctk.CTk):
             name="Stop Depth",
             min_limit=0.0,
             max_limit=240.0,
-            presets=self.load_presets("depth_presets", [("Bend 1", 12.000), ("Bend 2", 18.500), ("Bend 3", 24.000), ("Bend 4", 30.000)]),
+            presets=self.load_presets(
+                "depth_presets",
+                [("Bend 1", 12.000), ("Bend 2", 18.500), ("Bend 3", 24.000), ("Bend 4", 30.000)],
+            ),
         )
         self.height_axis = AxisState(
             name="Stop Height",
             min_limit=0.0,
             max_limit=150.0,
-            presets=self.load_presets("height_presets", [("5/8 Die", 10.000), ("1.0 Die", 11.000), ("1.5 Die", 12.000), ("2.0 Die", 13.000)]),
+            presets=self.load_presets(
+                "height_presets",
+                [("5/8 Die", 10.000), ("1.0 Die", 11.000), ("1.5 Die", 12.000), ("2.0 Die", 13.000)],
+            ),
         )
 
         self.controller = self.build_controller()
@@ -474,13 +784,22 @@ class BackgaugeApp(ctk.CTk):
 
         bottom_frame = ctk.CTkFrame(self)
         bottom_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=PANEL_PADX, pady=(0, PANEL_PADY))
-        bottom_frame.grid_columnconfigure(0, weight=1)
+        bottom_frame.grid_columnconfigure((0, 1), weight=1)
 
         self.home_panel = HomePanel(bottom_frame, self.home_all, self.home_depth, self.home_height)
         self.home_panel.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 6))
 
+        self.presets_button = ctk.CTkButton(
+            bottom_frame,
+            text="Edit Presets",
+            height=BUTTON_HEIGHT,
+            font=BUTTON_FONT,
+            command=self.open_presets_editor,
+        )
+        self.presets_button.grid(row=0, column=1, sticky="ew", padx=8, pady=(8, 6))
+
         self.status_label = ctk.CTkLabel(bottom_frame, text="IDLE", anchor="w", font=STATUS_FONT)
-        self.status_label.grid(row=1, column=0, sticky="ew", padx=14, pady=(2, 12))
+        self.status_label.grid(row=1, column=0, columnspan=2, sticky="ew", padx=14, pady=(2, 12))
 
         self.sync_from_controller()
         self.after(self.update_interval_ms, self.periodic_refresh)
@@ -488,7 +807,6 @@ class BackgaugeApp(ctk.CTk):
     def periodic_refresh(self) -> None:
         self.sync_from_controller()
         self.after(self.update_interval_ms, self.periodic_refresh)
-
 
     def get_config_float(self, section: str, option: str, fallback: float) -> float:
         try:
@@ -524,7 +842,6 @@ class BackgaugeApp(ctk.CTk):
             return fallback
 
     def build_controller(self):
-        # Depth axis config
         depth_section = "depth_motion"
         depth_pins_section = "depth_pins"
         depth_min_limit = self.get_config_float(depth_section, "min_limit", 0.0)
@@ -542,7 +859,6 @@ class BackgaugeApp(ctk.CTk):
         depth_min_sensor_pin = self.get_config_pin(depth_pins_section, "min_sensor_pin", 16)
         depth_max_sensor_pin = self.get_config_pin(depth_pins_section, "max_sensor_pin", 22)
 
-        # Height axis config
         height_section = "height_motion"
         height_pins_section = "height_pins"
         height_min_limit = self.get_config_float(height_section, "min_limit", 0.0)
@@ -610,7 +926,7 @@ class BackgaugeApp(ctk.CTk):
 
     def load_ini(self) -> configparser.ConfigParser:
         config = configparser.ConfigParser()
-        config.read("backgauge.ini")
+        config.read(CONFIG_FILE)
         return config
 
     def get_config_value(self, section: str, option: str, fallback: str) -> str:
@@ -619,7 +935,6 @@ class BackgaugeApp(ctk.CTk):
         except Exception:
             return fallback
 
- 
     def load_presets(self, section: str, fallback: list[tuple[str, float]]) -> list[tuple[str, float]]:
         if not self.config_data.has_section(section):
             return fallback
@@ -690,6 +1005,38 @@ class BackgaugeApp(ctk.CTk):
         self.sync_from_controller()
         self.set_status("All axes homed")
 
+    def open_presets_editor(self):
+        editor = ConfigEditor(
+            self,
+            CONFIG_FILE,
+            allowed_sections=PRESET_SECTIONS,
+            allow_password_change=False,
+            close_on_save=True,
+        )
+        self.wait_window(editor)
+
+        self.config_data = self.load_ini()
+
+        depth_presets = self.load_presets(
+            "depth_presets",
+            [("Bend 1", 12.000), ("Bend 2", 18.500), ("Bend 3", 24.000), ("Bend 4", 30.000)],
+        )
+        height_presets = self.load_presets(
+            "height_presets",
+            [("5/8 Die", 10.000), ("1.0 Die", 11.000), ("1.5 Die", 12.000), ("2.0 Die", 13.000)],
+        )
+
+        self.depth_axis.presets = depth_presets
+        self.height_axis.presets = height_presets
+
+        self.controller.depth.config.presets = depth_presets
+        self.controller.height.config.presets = height_presets
+
+        self.depth_panel.update_presets(depth_presets)
+        self.height_panel.update_presets(height_presets)
+
+        self.sync_from_controller()
+
     def destroy(self):
         if hasattr(self, "controller"):
             if hasattr(self.controller.depth, "stop_jog"):
@@ -712,215 +1059,17 @@ class BackgaugeApp(ctk.CTk):
         pw = dlg.result
         if pw is None:
             return
+
         correct_hash = get_password_from_ini()
         if hash_password(pw) == correct_hash:
-            ConfigEditor(self, CONFIG_FILE)
+            ConfigEditor(
+                self,
+                CONFIG_FILE,
+                allowed_sections=PROTECTED_SECTIONS,
+                allow_password_change=True,
+            )
         else:
-            messagebox.showerror("Access Denied", "Incorrect password.")      
-
-# Start Config Code Here
-
-CONFIG_FILE = "backgauge.ini"
-SECURITY_SECTION = "security"
-PASSWORD_KEY = "machine_setup_password"
-BACKUP_SUFFIX = ".bak"   
-
-
-def hash_password(password):
-    return hashlib.sha256(password.encode('utf-8')).hexdigest()
-
-def get_password_from_ini(path=CONFIG_FILE):
-    config = configparser.ConfigParser()
-    config.read(path)
-    return config.get(SECURITY_SECTION, PASSWORD_KEY, fallback="")
-
-def set_password_in_ini(new_password, config_path=CONFIG_FILE):
-    config = configparser.ConfigParser()
-    config.read(config_path)
-    if SECURITY_SECTION not in config:
-        config[SECURITY_SECTION] = {}
-
-    config[SECURITY_SECTION][PASSWORD_KEY] = hash_password(new_password)
-
-    config_dir = os.path.dirname(os.path.abspath(config_path)) or "."
-    with tempfile.NamedTemporaryFile("w", delete=False, dir=config_dir) as tf:
-        config.write(tf)
-        tempname = tf.name
-
-    os.replace(tempname, config_path)
-
-def backup_ini(path):
-    backup_file = path + BACKUP_SUFFIX
-    shutil.copy2(path, backup_file)
-    return backup_file
-
-class PasswordDialog(ctk.CTkToplevel):
-    def __init__(self, master, title="Password Required"):
-        super().__init__(master)
-        self.title(title)
-        self.resizable(False, False)
-        self.result = None
-        ctk.CTkLabel(self, text="Enter password:", font=LABEL_FONT).grid(row=0, column=0, padx=18, pady=18)
-        self.pw_var = ctk.StringVar()
-        self.entry = ctk.CTkEntry(self, textvariable=self.pw_var, show="*", font=ENTRY_FONT, width=200)
-        self.entry.grid(row=0, column=1, padx=18, pady=18)
-        self.entry.focus()
-        btn = ctk.CTkButton(self, text="OK", font=BUTTON_FONT, command=self.on_ok, height=BUTTON_HEIGHT)
-        btn.grid(row=1, column=0, columnspan=2, pady=(0, 18))
-        self.bind("<Return>", lambda e: self.on_ok())
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-
-    def on_ok(self):
-        self.result = self.pw_var.get()
-        self.destroy()
-
-class ChangePasswordDialog(ctk.CTkToplevel):
-    def __init__(self, master, title="Change Password"):
-        super().__init__(master)
-        self.title(title)
-        self.resizable(False, False)
-        self.result = None
-        ctk.CTkLabel(self, text="Current password:", font=LABEL_FONT).grid(row=0, column=0, padx=18, pady=8)
-        ctk.CTkLabel(self, text="New password:", font=LABEL_FONT).grid(row=1, column=0, padx=18, pady=8)
-        ctk.CTkLabel(self, text="Confirm new password:", font=LABEL_FONT).grid(row=2, column=0, padx=18, pady=8)
-        self.old_pw = ctk.CTkEntry(self, show="*", font=ENTRY_FONT)
-        self.new_pw = ctk.CTkEntry(self, show="*", font=ENTRY_FONT)
-        self.conf_pw = ctk.CTkEntry(self, show="*", font=ENTRY_FONT)
-        self.old_pw.grid(row=0, column=1, padx=18, pady=8)
-        self.new_pw.grid(row=1, column=1, padx=18, pady=8)
-        self.conf_pw.grid(row=2, column=1, padx=18, pady=8)
-        btn = ctk.CTkButton(self, text="OK", font=BUTTON_FONT, command=self.on_ok, height=BUTTON_HEIGHT)
-        btn.grid(row=3, column=0, columnspan=2, pady=(0, 18))
-        self.bind("<Return>", lambda e: self.on_ok())
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-
-    def on_ok(self):
-        self.result = (
-            self.old_pw.get(),
-            self.new_pw.get(),
-            self.conf_pw.get()
-        )
-        self.destroy()
-
-class ConfigEditor(ctk.CTkToplevel):
-    def __init__(self, master, config_file):
-        super().__init__(master)
-        self.title("Configuration Editor")
-        self.geometry(f"{CONF_SCREEN_WIDTH}x{CONF_SCREEN_HEIGHT}")
-        self.config_file = config_file
-        self.config = configparser.ConfigParser()
-        self.fields = {}
-        self.create_widgets()
-        self.load_config()
-
-    def create_widgets(self):
-        self.notebook = ctk.CTkTabview(self, width=CONF_SCREEN_WIDTH-2*PANEL_PADX, height=CONF_SCREEN_HEIGHT-120)
-        self.notebook.pack(fill="both", expand=True, padx=PANEL_PADX, pady=(PANEL_PADY, 0))
-        self.button_frame = ctk.CTkFrame(self)
-        self.button_frame.pack(fill="x", padx=PANEL_PADX, pady=(10, PANEL_PADY))
-        ctk.CTkButton(self.button_frame, text="Save", command=self.save_config, font=BUTTON_FONT, height=BUTTON_HEIGHT).pack(side="left", padx=8)
-        ctk.CTkButton(self.button_frame, text="Cancel", command=self.destroy, font=BUTTON_FONT, height=BUTTON_HEIGHT).pack(side="left", padx=8)
-        ctk.CTkButton(self.button_frame, text="Reload from file", command=self.load_config, font=BUTTON_FONT, height=BUTTON_HEIGHT).pack(side="left", padx=8)
-        ctk.CTkButton(self.button_frame, text="Change Password", command=self.change_password, font=BUTTON_FONT, height=BUTTON_HEIGHT).pack(side="right", padx=8)
-
-    def load_config(self):
-        self.config.read(self.config_file)
-        # Remove all tabs from the tabview using public API if available
-        if hasattr(self.notebook, 'tabs'):
-            for tab_name in self.notebook.tabs():
-                self.notebook.delete(tab_name)
-        else:
-            for tab_name in list(self.notebook._tab_dict.keys()):
-                self.notebook.delete(tab_name)
-        self.fields.clear()
-        for section in self.config.sections():
-            self.notebook.add(section)
-            tab_frame = self.notebook.tab(section)
-            tab_frame.grid_columnconfigure(1, weight=1)
-            self.fields[section] = {}
-            row = 0
-            for key, value in self.config[section].items():
-                if section == SECURITY_SECTION and key == PASSWORD_KEY:
-                    continue
-
-                ctk.CTkLabel(tab_frame, text=key, font=LABEL_FONT).grid(
-                    row=row, column=0, sticky="w", padx=12, pady=6
-                )
-                entry = ctk.CTkEntry(tab_frame, font=ENTRY_FONT, width=220)
-                entry.insert(0, value)
-                entry.grid(row=row, column=1, sticky="ew", padx=12, pady=6)
-                self.fields[section][key] = entry
-                row += 1
-
-    def save_config(self):
-        key_types = {
-            'min_limit': float, 'max_limit': float, 'home_position': float, 'steps_per_unit': float, 'max_rpm': float,
-            'cw_value': int, 'ccw_value': int, 'simulate_timing': bool, 'timing_scale': float,
-            'jog_step_1': float, 'jog_step_2': float, 'jog_step_3': float,
-            'step_pin': int, 'direction_pin': int, 'min_sensor_pin': int, 'max_sensor_pin': int,
-            'fullscreen': bool, 'update_interval_ms': int, 'show_backgauge_view': bool
-        }
-        for section, keys in self.fields.items():
-            for key, entry in keys.items():
-                value = entry.get()
-                expected_type = key_types.get(key)
-                if expected_type is bool:
-                    if value.lower() not in ["true", "false"]:
-                        messagebox.showerror("Validation Error", f"{section}.{key} must be 'true' or 'false'")
-                        return
-                elif expected_type is int:
-                    try:
-                        int(value)
-                    except ValueError:
-                        messagebox.showerror("Validation Error", f"{section}.{key} must be an integer")
-                        return
-                elif expected_type is float:
-                    try:
-                        float(value)
-                    except ValueError:
-                        messagebox.showerror("Validation Error", f"{section}.{key} must be a float")
-                        return
-                self.config[section][key] = value
-        try:
-            backup_file = backup_ini(self.config_file)
-            config_dir = os.path.dirname(os.path.abspath(self.config_file)) or "."
-            with tempfile.NamedTemporaryFile("w", delete=False, dir=config_dir) as tf:
-                self.config.write(tf)
-                tempname = tf.name
-            os.replace(tempname, self.config_file)
-            messagebox.showinfo("Success", f"Configuration saved.\nBackup: {backup_file}")
-        except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to save config: {e}")
-
-    def change_password(self):
-        dlg = ChangePasswordDialog(self, title="Change Password")
-        dlg.wait_visibility()
-        dlg.grab_set()
-        self.wait_window(dlg)
-        if dlg.result:
-            old_pw, new_pw, conf_pw = dlg.result
-            current_hash = get_password_from_ini(self.config_file)
-            if hash_password(old_pw) != current_hash:
-                messagebox.showerror("Error", "Current password is incorrect.")
-                return
-            if not new_pw or new_pw != conf_pw:
-                messagebox.showerror("Error", "New passwords do not match or are empty.")
-                return
-            try:
-                if SECURITY_SECTION not in self.config:
-                    self.config[SECURITY_SECTION] = {}
-                self.config[SECURITY_SECTION][PASSWORD_KEY] = hash_password(new_pw)
-                if SECURITY_SECTION in self.fields and PASSWORD_KEY in self.fields[SECURITY_SECTION]:
-                    self.fields[SECURITY_SECTION][PASSWORD_KEY].delete(0, 'end')
-                    self.fields[SECURITY_SECTION][PASSWORD_KEY].insert(0, hash_password(new_pw))
-                self.save_config()
-                messagebox.showinfo("Success", "Password changed successfully.")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to change password: {e}")
-    
-
-
-#End Config Code
+            messagebox.showerror("Access Denied", "Incorrect password.")
 
 
 if __name__ == "__main__":
