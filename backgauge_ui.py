@@ -13,6 +13,8 @@ from backgauge_controller import BackgaugeHardwareController
 
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
+CONF_SCREEN_WIDTH = 800
+CONF_SCREEN_HEIGHT = 600
 PANEL_PADX = 18
 PANEL_PADY = 18
 TITLE_FONT = ("Arial", 34, "bold")
@@ -24,7 +26,6 @@ BUTTON_FONT = ("Arial", 24, "bold")
 STATUS_FONT = ("Arial", 22, "bold")
 BUTTON_HEIGHT = 72
 SMALL_BUTTON_HEIGHT = 64
-MINI_BUTTON_HEIGHT = 40
 
 
 ctk.set_appearance_mode("dark")
@@ -277,10 +278,6 @@ class AxisPanel(ctk.CTkFrame):
         fine_jog_frame.grid(row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=(8, 8))
         fine_jog_frame.grid_columnconfigure((0, 1, 2, 3, 4, 5), weight=1)
 
-        if axis.name == "Stop Depth":
-            axis_key = "Stop Depth"
-        else:
-            axis_key = "Stop Height"
 
         fine_jog_buttons = [
             ("-.001", -0.001),
@@ -742,10 +739,14 @@ def set_password_in_ini(new_password, config_path=CONFIG_FILE):
     config.read(config_path)
     if SECURITY_SECTION not in config:
         config[SECURITY_SECTION] = {}
+
     config[SECURITY_SECTION][PASSWORD_KEY] = hash_password(new_password)
-    with tempfile.NamedTemporaryFile('w', delete=False) as tf:
+
+    config_dir = os.path.dirname(os.path.abspath(config_path)) or "."
+    with tempfile.NamedTemporaryFile("w", delete=False, dir=config_dir) as tf:
         config.write(tf)
         tempname = tf.name
+
     os.replace(tempname, config_path)
 
 def backup_ini(path):
@@ -805,7 +806,7 @@ class ConfigEditor(ctk.CTkToplevel):
     def __init__(self, master, config_file):
         super().__init__(master)
         self.title("Configuration Editor")
-        self.geometry(f"{SCREEN_WIDTH}x{SCREEN_HEIGHT}")
+        self.geometry(f"{CONF_SCREEN_WIDTH}x{CONF_SCREEN_HEIGHT}")
         self.config_file = config_file
         self.config = configparser.ConfigParser()
         self.fields = {}
@@ -813,7 +814,7 @@ class ConfigEditor(ctk.CTkToplevel):
         self.load_config()
 
     def create_widgets(self):
-        self.notebook = ctk.CTkTabview(self, width=SCREEN_WIDTH-2*PANEL_PADX, height=SCREEN_HEIGHT-120)
+        self.notebook = ctk.CTkTabview(self, width=CONF_SCREEN_WIDTH-2*PANEL_PADX, height=CONF_SCREEN_HEIGHT-120)
         self.notebook.pack(fill="both", expand=True, padx=PANEL_PADX, pady=(PANEL_PADY, 0))
         self.button_frame = ctk.CTkFrame(self)
         self.button_frame.pack(fill="x", padx=PANEL_PADX, pady=(10, PANEL_PADY))
@@ -839,7 +840,12 @@ class ConfigEditor(ctk.CTkToplevel):
             self.fields[section] = {}
             row = 0
             for key, value in self.config[section].items():
-                ctk.CTkLabel(tab_frame, text=key, font=LABEL_FONT).grid(row=row, column=0, sticky="w", padx=12, pady=6)
+                if section == SECURITY_SECTION and key == PASSWORD_KEY:
+                    continue
+
+                ctk.CTkLabel(tab_frame, text=key, font=LABEL_FONT).grid(
+                    row=row, column=0, sticky="w", padx=12, pady=6
+                )
                 entry = ctk.CTkEntry(tab_frame, font=ENTRY_FONT, width=220)
                 entry.insert(0, value)
                 entry.grid(row=row, column=1, sticky="ew", padx=12, pady=6)
@@ -877,7 +883,8 @@ class ConfigEditor(ctk.CTkToplevel):
                 self.config[section][key] = value
         try:
             backup_file = backup_ini(self.config_file)
-            with tempfile.NamedTemporaryFile('w', delete=False) as tf:
+            config_dir = os.path.dirname(os.path.abspath(self.config_file)) or "."
+            with tempfile.NamedTemporaryFile("w", delete=False, dir=config_dir) as tf:
                 self.config.write(tf)
                 tempname = tf.name
             os.replace(tempname, self.config_file)
