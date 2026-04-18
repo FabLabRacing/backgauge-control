@@ -1,4 +1,3 @@
-
 import customtkinter as ctk
 from dataclasses import dataclass, field
 import configparser
@@ -602,7 +601,7 @@ class ChangePasswordDialog(ctk.CTkToplevel):
 
 
 class ConfigEditor(ctk.CTkToplevel):
-    def __init__(self, master: Any, config_file: str, allowed_sections: list[str] None = None, allow_password_change: bool = True, close_on_save: bool = False) -> None:
+    def __init__(self, master: Any, config_file: str, allowed_sections: list[str] = None, allow_password_change: bool = True, close_on_save: bool = False) -> None:
         super().__init__(master)
         self.title("Configuration Editor")
         self.geometry(f"{CONF_SCREEN_WIDTH}x{CONF_SCREEN_HEIGHT}")
