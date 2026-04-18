@@ -1,6 +1,6 @@
 # Backgauge Control System
 
-A Python-based backgauge control system designed for a Raspberry Pi, featuring a modern touchscreen UI, simulation mode, and real hardware control using stepper drivers.
+A Python-based backgauge control system designed for a Raspberry Pi, featuring a modern touchscreen UI, and hardware control using stepper drivers.
 
 ---
 
@@ -9,7 +9,6 @@ A Python-based backgauge control system designed for a Raspberry Pi, featuring a
 This project provides a structured and extensible control system for a 2-axis backgauge (Depth and Height), with:
 
 - Clean UI (CustomTkinter)
-- Simulation mode for development/testing
 - Hardware mode for real stepper control
 - Modular architecture (UI ↔ Controller ↔ Hardware)
 
@@ -23,7 +22,6 @@ Originally developed as a prototype, now evolved into a working motion control f
 - Jogging, presets (Bend 1–4), and homing
 - Real-time DRO updates
 - Visual backgauge representation
-- Simulation backend (no hardware required)
 - Hardware backend (Raspberry Pi + stepper drivers)
 - Threaded motion control (non-blocking UI)
 
@@ -32,14 +30,13 @@ Originally developed as a prototype, now evolved into a working motion control f
 ## Architecture
 
 UI Layer
-  └── backgauge_ui_with_backend_selector.py
+  └── backgauge_ui.py
 
 Shared Logic
   └── backgauge_common.py
 
 Controllers
-  ├── backgauge_sim_controller.py
-  └── backgauge_hw_controller.py
+  └── backgauge_controller.py
 
 ### Key Design Principle
 
@@ -100,25 +97,10 @@ sudo apt install python3-rpi.gpio
 
 ## Running the Application
 
-python backgauge_ui_with_backend_selector.py
+python backgauge_ui.py
 
 ---
 
-## Modes
-
-At the top of the UI file:
-
-MODE = "SIM"   # or "HW"
-
-### SIM Mode
-- No hardware required
-- Useful for development and UI testing
-
-### HW Mode
-- Uses GPIO to drive stepper motors
-- Requires proper wiring and hardware
-
----
 
 ## Motion Behavior
 
@@ -134,7 +116,6 @@ MODE = "SIM"   # or "HW"
 - Step timing uses Python time.sleep() (non-real-time)
 - No acceleration/deceleration yet
 - Limit switches wired but basic handling only
-- Performance depends on Raspberry Pi and display method (VNC vs local)
 
 ---
 
