@@ -1,3 +1,4 @@
+
 import customtkinter as ctk
 from dataclasses import dataclass, field
 import configparser
@@ -6,6 +7,8 @@ import os
 import shutil
 import tempfile
 import hashlib
+from typing import Callable, Any
+import ast
 from backgauge_common import AxisConfig
 from backgauge_controller import BackgaugeHardwareController
 
@@ -70,14 +73,11 @@ def set_password_in_ini(new_password: str, config_path=CONFIG_FILE) -> None:
     config.read(config_path)
     if SECURITY_SECTION not in config:
         config[SECURITY_SECTION] = {}
-
     config[SECURITY_SECTION][PASSWORD_KEY] = hash_password(new_password)
-
     config_dir = os.path.dirname(os.path.abspath(config_path)) or "."
     with tempfile.NamedTemporaryFile("w", delete=False, dir=config_dir) as tf:
         config.write(tf)
         tempname = tf.name
-
     os.replace(tempname, config_path)
 
 
@@ -98,8 +98,66 @@ class AxisState:
     presets: list[tuple[str, float]] = field(default_factory=list)
 
 
+def safe_eval(expr: str) -> float:
+    """Safely evaluate a math expression using ast. Only allows +, -, *, /, (), and numbers."""
+    allowed_nodes = {
+        ast.Expression,
+        ast.BinOp,
+        ast.UnaryOp,
+        ast.Num,
+        ast.Constant,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.UAdd,
+        ast.USub,
+    }
+
+    def _eval(node):
+        if type(node) not in allowed_nodes:
+            raise ValueError(f"Disallowed expression: {type(node).__name__}")
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        elif isinstance(node, ast.BinOp):
+            left = _eval(node.left)
+            right = _eval(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            elif isinstance(node.op, ast.Sub):
+                return left - right
+            elif isinstance(node.op, ast.Mult):
+                return left * right
+            elif isinstance(node.op, ast.Div):
+                return left / right
+            else:
+                raise ValueError("Unsupported binary operator")
+        elif isinstance(node, ast.UnaryOp):
+            operand = _eval(node.operand)
+            if isinstance(node.op, ast.UAdd):
+                return +operand
+            elif isinstance(node.op, ast.USub):
+                return -operand
+            else:
+                raise ValueError("Unsupported unary operator")
+        elif isinstance(node, ast.Num):  # Python <3.8
+            return node.n
+        elif isinstance(node, ast.Constant):  # Python 3.8+
+            if isinstance(node.value, (int, float)):
+                return node.value
+            else:
+                raise ValueError("Only int and float constants allowed")
+        else:
+            raise ValueError(f"Disallowed node: {type(node).__name__}")
+
+    try:
+        parsed = ast.parse(expr, mode="eval")
+        return float(_eval(parsed))
+    except Exception as e:
+        raise ValueError(f"Invalid expression: {e}")
+
 class CalculatorPanel(ctk.CTkFrame):
-    def __init__(self, master, on_send_depth, on_send_height):
+    def __init__(self, master: Any, on_send_depth: Callable[[float], None], on_send_height: Callable[[float], None]) -> None:
         super().__init__(master)
         self.on_send_depth = on_send_depth
         self.on_send_height = on_send_height
@@ -171,8 +229,8 @@ class CalculatorPanel(ctk.CTkFrame):
     def evaluate(self) -> None:
         expression = self.display.get().strip()
         try:
-            result = eval(expression, {"__builtins__": {}}, {})
-            self.set_value(float(result))
+            result = safe_eval(expression)
+            self.set_value(result)
         except Exception:
             self.display.delete(0, "end")
             self.display.insert(0, "ERR")
@@ -201,7 +259,7 @@ class CalculatorPanel(ctk.CTkFrame):
 
 
 class BackgaugeSchematic(ctk.CTkFrame):
-    def __init__(self, master):
+    def __init__(self, master: Any) -> None:
         super().__init__(master)
         self.depth_current = 0.0
         self.depth_commanded = 0.0
@@ -235,7 +293,7 @@ class BackgaugeSchematic(ctk.CTkFrame):
         height_current: float,
         height_commanded: float,
         in_position: bool,
-    ):
+    ) -> None:
         self.depth_current = depth_current
         self.depth_commanded = depth_commanded
         self.height_current = height_current
@@ -249,7 +307,7 @@ class BackgaugeSchematic(ctk.CTkFrame):
     def map_height(self, value: float, y0: float, y1: float) -> float:
         return y1 - (max(0.0, min(self.height_max, value)) / self.height_max) * (y1 - y0) if self.height_max > 0 else y1
 
-    def redraw(self):
+    def redraw(self) -> None:
         c = self.canvas
         c.delete("all")
         w = max(c.winfo_width(), 400)
@@ -302,7 +360,7 @@ class BackgaugeSchematic(ctk.CTkFrame):
 
 
 class AxisPanel(ctk.CTkFrame):
-    def __init__(self, master, axis: AxisState, controller_axis, change_callback=None):
+    def __init__(self, master: Any, axis: AxisState, controller_axis, change_callback: Callable[[], None] | None = None) -> None:
         super().__init__(master)
         self.axis = axis
         self.controller_axis = controller_axis
@@ -413,7 +471,7 @@ class AxisPanel(ctk.CTkFrame):
         self.commanded_entry.insert(0, self.format_value(state.commanded))
         self.update_colors()
 
-    def update_colors(self):
+    def update_colors(self) -> None:
         state = self.controller_axis.state
         tol = 0.0005
         at_home_position = abs(state.current - self.controller_axis.config.home_position) < tol
@@ -485,7 +543,7 @@ class AxisPanel(ctk.CTkFrame):
 
 
 class HomePanel(ctk.CTkFrame):
-    def __init__(self, master, home_all, home_depth, home_height):
+    def __init__(self, master: Any, home_all: Callable[[], None], home_depth: Callable[[], None], home_height: Callable[[], None]) -> None:
         super().__init__(master)
         self.grid_columnconfigure((0, 1, 2), weight=1)
         ctk.CTkButton(self, text="Home All", height=BUTTON_HEIGHT, command=home_all).grid(row=0, column=0, sticky="ew", padx=8, pady=8)
@@ -494,7 +552,7 @@ class HomePanel(ctk.CTkFrame):
 
 
 class PasswordDialog(ctk.CTkToplevel):
-    def __init__(self, master, title="Password Required"):
+    def __init__(self, master: Any, title: str = "Password Required") -> None:
         super().__init__(master)
         self.title(title)
         self.resizable(False, False)
@@ -509,13 +567,13 @@ class PasswordDialog(ctk.CTkToplevel):
         self.bind("<Return>", lambda e: self.on_ok())
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
-    def on_ok(self):
+    def on_ok(self) -> None:
         self.result = self.pw_var.get()
         self.destroy()
 
 
 class ChangePasswordDialog(ctk.CTkToplevel):
-    def __init__(self, master, title="Change Password"):
+    def __init__(self, master: Any, title: str = "Change Password") -> None:
         super().__init__(master)
         self.title(title)
         self.resizable(False, False)
@@ -534,7 +592,7 @@ class ChangePasswordDialog(ctk.CTkToplevel):
         self.bind("<Return>", lambda e: self.on_ok())
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
-    def on_ok(self):
+    def on_ok(self) -> None:
         self.result = (
             self.old_pw.get(),
             self.new_pw.get(),
@@ -544,7 +602,7 @@ class ChangePasswordDialog(ctk.CTkToplevel):
 
 
 class ConfigEditor(ctk.CTkToplevel):
-    def __init__(self, master, config_file, allowed_sections=None, allow_password_change=True, close_on_save=False):
+    def __init__(self, master: Any, config_file: str, allowed_sections: list[str] None = None, allow_password_change: bool = True, close_on_save: bool = False) -> None:
         super().__init__(master)
         self.title("Configuration Editor")
         self.geometry(f"{CONF_SCREEN_WIDTH}x{CONF_SCREEN_HEIGHT}")
@@ -557,7 +615,7 @@ class ConfigEditor(ctk.CTkToplevel):
         self.create_widgets()
         self.load_config()
 
-    def create_widgets(self):
+    def create_widgets(self) -> None:
         self.notebook = ctk.CTkTabview(
             self,
             width=CONF_SCREEN_WIDTH - 2 * PANEL_PADX,
@@ -601,7 +659,7 @@ class ConfigEditor(ctk.CTkToplevel):
                 height=BUTTON_HEIGHT,
             ).pack(side="right", padx=8)
 
-    def load_config(self):
+    def load_config(self) -> None:
         self.config.read(self.config_file)
 
         if hasattr(self.notebook, "tabs"):
@@ -636,7 +694,7 @@ class ConfigEditor(ctk.CTkToplevel):
                 self.fields[section][key] = entry
                 row += 1
 
-    def save_config(self):
+    def save_config(self) -> None:
         key_types = {
             "min_limit": float,
             "max_limit": float,
@@ -696,7 +754,7 @@ class ConfigEditor(ctk.CTkToplevel):
         except Exception as e:
             messagebox.showerror("Save Error", f"Failed to save config: {e}")
 
-    def change_password(self):
+    def change_password(self) -> None:
         dlg = ChangePasswordDialog(self, title="Change Password")
         dlg.wait_visibility()
         dlg.grab_set()
@@ -724,7 +782,7 @@ class ConfigEditor(ctk.CTkToplevel):
 
 
 class BackgaugeApp(ctk.CTk):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.config_data = self.load_ini()
         self.fullscreen = self.get_config_bool("ui", "fullscreen", True)
@@ -1005,7 +1063,7 @@ class BackgaugeApp(ctk.CTk):
         self.sync_from_controller()
         self.set_status("All axes homed")
 
-    def open_presets_editor(self):
+    def open_presets_editor(self) -> None:
         editor = ConfigEditor(
             self,
             CONFIG_FILE,
@@ -1037,7 +1095,7 @@ class BackgaugeApp(ctk.CTk):
 
         self.sync_from_controller()
 
-    def destroy(self):
+    def destroy(self) -> None:
         if hasattr(self, "controller"):
             if hasattr(self.controller.depth, "stop_jog"):
                 self.controller.depth.stop_jog()
@@ -1047,11 +1105,11 @@ class BackgaugeApp(ctk.CTk):
                 self.controller.shutdown_gpio()
         super().destroy()
 
-    def create_gear_icon(self):
+    def create_gear_icon(self) -> None:
         gear_btn = ctk.CTkButton(self, text="⚙️", font=BUTTON_FONT, width=30, height=30, command=self.open_password_dialog)
         gear_btn.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
-    def open_password_dialog(self):
+    def open_password_dialog(self) -> None:
         dlg = PasswordDialog(self, title="Password Required")
         dlg.wait_visibility()
         dlg.grab_set()
