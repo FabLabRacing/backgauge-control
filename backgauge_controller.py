@@ -3,6 +3,110 @@ from __future__ import annotations
 import threading
 import time
 
+import threading
+from typing import Optional
+
+try:
+    import serial
+except ImportError:
+    serial = None
+
+from backgauge_common import AxisConfig, AxisRuntimeState, StateCallback, StatusCallback
+
+
+class SerialTransport:
+    def __init__(self, port: str, baudrate: int, status_callback=None):
+        self.port = port
+        self.baudrate = baudrate
+        self._ser = None
+        self._status_callback = status_callback
+
+    def open(self):
+        if serial is None:
+            raise RuntimeError("pyserial not installed")
+
+        self._ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
+        self._emit_status(f"ESP32 connected on {self.port}")
+
+    def close(self):
+        if self._ser:
+            self._ser.close()
+            self._ser = None
+
+    def send(self, msg: str):
+        if self._ser:
+            self._ser.write((msg.strip() + "\n").encode())
+
+    def _emit_status(self, msg):
+        if self._status_callback:
+            self._status_callback(msg)
+
+
+class ESP32AxisController:
+    def __init__(self, axis_id, config, transport, status_cb=None, state_cb=None):
+        self.axis_id = axis_id
+        self.config = config
+        self.transport = transport
+        self.state = AxisRuntimeState(
+            current=config.home_position,
+            commanded=config.home_position,
+        )
+        self._status_cb = status_cb
+        self._state_cb = state_cb
+
+    def set_commanded(self, value):
+        self.state.commanded = value
+        self.transport.send(f"SET_CMD,{self.axis_id},{value}")
+        return value
+
+    def clear_commanded(self):
+        self.state.commanded = self.config.home_position
+        return self.state.commanded
+
+    def move_to_commanded(self):
+        self.transport.send(f"MOVE,{self.axis_id}")
+        return self.state.current
+
+    def start_jog(self, direction):
+        sign = "+" if direction > 0 else "-"
+        self.transport.send(f"JOG_START,{self.axis_id},{sign}")
+
+    def stop_jog(self):
+        self.transport.send(f"JOG_STOP,{self.axis_id}")
+
+    def load_preset(self, value):
+        return self.set_commanded(value)
+
+    def home(self):
+        self.transport.send(f"HOME,{self.axis_id}")
+
+    def initialize_gpio(self):
+        # keep same name for compatibility
+        if self._status_cb:
+            self._status_cb(f"{self.config.name}: ESP32 ready")
+
+    def shutdown_gpio(self):
+        self.stop_jog()
+
+
+class BackgaugeESP32Controller:
+    def __init__(self, depth_config, height_config, port, baudrate, status_callback=None, state_callback=None):
+        self.transport = SerialTransport(port, baudrate, status_callback)
+
+        self.depth = ESP32AxisController("D", depth_config, self.transport, status_callback, state_callback)
+        self.height = ESP32AxisController("H", height_config, self.transport, status_callback, state_callback)
+
+    def initialize_gpio(self):
+        self.transport.open()
+        self.depth.initialize_gpio()
+        self.height.initialize_gpio()
+
+    def shutdown_gpio(self):
+        self.transport.close()
+
+    def home_all(self):
+        self.transport.send("HOME_ALL")
+
 try:
     import RPi.GPIO as GPIO
 except ImportError:  # pragma: no cover

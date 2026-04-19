@@ -971,12 +971,29 @@ class BackgaugeApp(ctk.CTk):
             timing_scale=height_timing_scale,
         )
 
-        controller = BackgaugeHardwareController(
-            depth_config=depth_config,
-            height_config=height_config,
-            status_callback=self.threadsafe_status,
-            state_callback=self.request_sync,
-        )
+        mode = self.get_config_value("ui", "mode", "pi_gpio").strip().lower()
+
+        if mode == "esp32":
+            from backgauge_esp32_controller import BackgaugeESP32Controller
+
+            esp32_port = self.get_config_value("ui", "esp32_port", "/dev/ttyUSB0")
+            esp32_baud = self.get_config_int("ui", "esp32_baud", 115200)
+
+            controller = BackgaugeESP32Controller(
+                depth_config=depth_config,
+                height_config=height_config,
+                port=esp32_port,
+                baudrate=esp32_baud,
+                status_callback=self.threadsafe_status,
+                state_callback=self.request_sync,
+            )
+        else:
+            controller = BackgaugeHardwareController(
+                depth_config=depth_config,
+                height_config=height_config,
+                status_callback=self.threadsafe_status,
+                state_callback=self.request_sync,
+            )
 
         controller.initialize_gpio()
         return controller
