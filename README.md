@@ -33,17 +33,17 @@ The system is designed around a clear separation of responsibilities:
 
 ## Architecture
 
-UI Layer
+UI Layer  
   └── backgauge_ui.py
 
-Shared Logic
+Shared Logic  
   └── backgauge_common.py
 
-Controller Layer
-  ├── backgauge_controller.py
-  └── backgauge_esp32_controller.py
+Controller Layer  
+  ├── backgauge_controller.py  
+  └── backgauge_esp32_controller.py  
 
-Firmware
+Firmware  
   └── esp32/ (PlatformIO project)
 
 ---
