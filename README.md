@@ -1,29 +1,33 @@
 # Backgauge Control System
 
-A Python-based backgauge control system designed for a Raspberry Pi, featuring a modern touchscreen UI, and hardware control using stepper drivers.
+A modular, extensible backgauge control system featuring a Python-based UI and pluggable hardware backends, including both Raspberry Pi GPIO and ESP32-based motion control.
 
 ---
 
 ## Overview
 
-This project provides a structured and extensible control system for a 2-axis backgauge (Depth and Height), with:
+This project provides a structured control system for a 2-axis backgauge (Depth and Height), with a focus on clean architecture, flexibility, and real-world usability.
 
-- Clean UI (CustomTkinter)
-- Hardware mode for real stepper control
-- Modular architecture (UI ↔ Controller ↔ Hardware)
+The system is designed around a clear separation of responsibilities:
 
-Originally developed as a prototype, now evolved into a working motion control foundation.
+- UI handles user interaction and display
+- Controller layer translates intent into motion commands
+- Hardware backend executes motion
 
 ---
 
-## Features
+## Key Features
 
 - Dual-axis control (Depth & Height)
-- Jogging, presets (Bend 1–4), and homing
-- Real-time DRO updates
+- Jogging, presets (Bend 1–4), and homing (in progress)
+- Real-time DRO display
 - Visual backgauge representation
-- Hardware backend (Raspberry Pi + stepper drivers)
-- Threaded motion control (non-blocking UI)
+- Configurable UI via `.ini`
+- Multiple hardware backends:
+  - Raspberry Pi GPIO (original implementation)
+  - ESP32 motion controller over USB serial
+- Modular architecture (UI ↔ Controller ↔ Hardware)
+- Incremental development approach (safe bring-up on real hardware)
 
 ---
 
@@ -35,108 +39,84 @@ UI Layer
 Shared Logic
   └── backgauge_common.py
 
-Controllers
-  └── backgauge_controller.py
+Controller Layer
+  ├── backgauge_controller.py
+  └── backgauge_esp32_controller.py
 
-### Key Design Principle
+Firmware
+  └── esp32/ (PlatformIO project)
 
-Motion control is isolated from UI updates to maintain smooth stepper operation.
+---
+
+## Design Philosophy
+
+High-level intent stays on the PC  
+Time-critical motion runs on dedicated hardware
 
 ---
 
 ## Hardware Requirements
 
+### Raspberry Pi Mode
+
 - Raspberry Pi (tested on Pi 3 B+)
 - Stepper drivers (tested with DM542T)
+- ULN2803 (or similar transistor array)
 - Stepper motors
-- ULN2803 (or similar transistor array) for signal interfacing
-- 5V power supply (logic)
-- 24V power supply (motor)
-- Shared ground between all systems
+- 5V logic supply
+- 24V motor supply
+- Common ground
+
+### ESP32 Mode
+
+- ESP32 development board
+- Stepper drivers (DM542T or similar)
+- Stepper motors
+- USB connection to host PC
+- Same power considerations as above
 
 ---
 
-## Wiring (Typical Setup)
+## ESP32 Firmware
 
-Using ULN2803 (recommended)
+Located in:
 
-Example (Depth axis)
+esp32/
 
-Signal | Pi Pin | ULN2803 | Driver
------- | ------ | ------- | ------
-STEP   | 11     | IN1 → OUT18 | PUL-
-DIR    | 29     | IN2 → OUT17 | DIR-
-+5V    | —      | —           | PUL+, DIR+
+Built using PlatformIO.
 
-- ULN2803 pin 9 → GND
-- All grounds shared
+---
+
+## Configuration
+
+Example:
+
+[ui]
+mode = esp32
+fullscreen = false
+update_interval_ms = 100
+esp32_port = /dev/ttyUSB0
+esp32_baud = 115200
 
 ---
 
 ## Software Setup
 
-### 1. Clone repository
-
 git clone <your-repo-url>
 cd backgauge-control
-
-### 2. Create virtual environment
 
 python3 -m venv venv
 source venv/bin/activate
 
-### 3. Install dependencies
+pip install customtkinter pyserial
 
-pip install customtkinter
-pip install RPi.GPIO
-
-On Raspberry Pi, you may also use:
-sudo apt install python3-rpi.gpio
+sudo apt install python3-tk
 
 ---
 
-## Running the Application
+## Running
 
-python backgauge_ui.py
-
----
-
-
-## Motion Behavior
-
-- Step pulses generated in a dedicated worker thread
-- UI updates are decoupled from motion loop
-- Incremental position tracking during movement
-- Adjustable update rate for performance tuning
-
----
-
-## Known Limitations
-
-- Step timing uses Python time.sleep() (non-real-time)
-- No acceleration/deceleration yet
-- Limit switches wired but basic handling only
-
----
-
-## Future Improvements
-
-- Proper step timing calculation (RPM-based)
-- Acceleration / deceleration (ramping)
-- Full homing routine using limit switches
-- Improved UI performance (optional reduced redraw during motion)
-- Optional migration to hardware-timed pulses (e.g., pigpio)
-
----
-
-## Development Notes
-
-- Built incrementally from a UI prototype
-- Designed for clarity and maintainability
-- Emphasis on separating:
-  - UI logic
-  - motion logic
-  - hardware interface
+python3 backgauge_ui.py
 
 ---
 
