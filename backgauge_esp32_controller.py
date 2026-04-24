@@ -255,9 +255,12 @@ class BackgaugeESP32Controller:
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
 
-        time.sleep(0.2)
-        self.transport.send_line("PING")
-        self.transport.send_line("STATUS?")
+        time.sleep(0.5)
+        try:
+            self.transport.send_line("PING")
+            self.transport.send_line("STATUS?")
+        except Exception as exc:
+            self._emit_status(f"ESP32 startup error: {exc}")
 
     def shutdown_gpio(self) -> None:
         self.stop_all()
