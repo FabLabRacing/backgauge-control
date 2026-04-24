@@ -8,3 +8,4 @@ backgauge.ini.bak
 esp32/.pio/
 esp32/.vscode/
 esp32/.cache/
+esp32/src/*.code-workspace
