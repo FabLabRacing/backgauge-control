@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 import hashlib
-from typing import Callable, Any
+from typing import Callable, Any, Optional
 import ast
 from backgauge_common import AxisConfig
 from backgauge_controller import BackgaugeHardwareController
@@ -601,7 +601,7 @@ class ChangePasswordDialog(ctk.CTkToplevel):
 
 
 class ConfigEditor(ctk.CTkToplevel):
-    def __init__(self, master: Any, config_file: str, allowed_sections: list[str] = None, allow_password_change: bool = True, close_on_save: bool = False) -> None:
+    def __init__(self, master: Any, config_file: str, allowed_sections: Optional[list[str]] = None, allow_password_change: bool = True, close_on_save: bool = False) -> None:
         super().__init__(master)
         self.title("Configuration Editor")
         self.geometry(f"{CONF_SCREEN_WIDTH}x{CONF_SCREEN_HEIGHT}")
@@ -662,7 +662,7 @@ class ConfigEditor(ctk.CTkToplevel):
         self.config.read(self.config_file)
 
         if hasattr(self.notebook, "tabs"):
-            for tab_name in self.notebook.tabs():
+            for tab_name in list(self.notebook._tab_dict.keys()):
                 self.notebook.delete(tab_name)
         else:
             for tab_name in list(self.notebook._tab_dict.keys()):
@@ -1048,6 +1048,9 @@ class BackgaugeApp(ctk.CTk):
             self.sync_schematic()
 
     def sync_schematic(self) -> None:
+        if self.schematic is None:
+            return
+
         depth_state = self.controller.depth.state
         height_state = self.controller.height.state
         self.schematic.set_values(
