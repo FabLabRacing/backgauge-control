@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Backgauge
+Comment=Launch Backgauge App
+Path=/path/to/projects/backgauge-control
+Exec=/path/to/projects/backgauge-control/venv/bin/python3 /home/jakerson/projects/backgauge-control/backgauge_ui.py
+Icon=/path/to/projects/backgauge-control/icons/backgauge.ico
+Terminal=false
+Type=Application
+Categories=Development;
